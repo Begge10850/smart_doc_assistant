@@ -1,12 +1,31 @@
+# Streamlit web app
 streamlit
+
+# AWS S3 upload/download
 boto3
-python-dotenv
-sentence-transformers
-faiss-cpu
-openai
+
+# Text extraction and parsing
+pdfplumber
 python-docx
-PyMuPDF
-sentence-transformers
-faiss-cpu
-streamlit
+pymupdf  # for annotations
+pdf2image
+
+# OCR API support
 requests
+
+# Vectorization + search
+sentence-transformers
+faiss-cpu  # for FAISS indexing
+scikit-learn
+numpy
+scipy
+
+# GPT-based Q&A
+openai
+
+# Utilities and compatibility
+python-dotenv  # for local .env support (optional)
+Pillow  # image processing (used by pdf2image)
+
+# Optional (you may already have)
+tqdm  # for progress bars (optional)
