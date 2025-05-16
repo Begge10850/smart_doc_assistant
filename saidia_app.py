@@ -103,15 +103,20 @@ if uploaded_file and process_triggered:
     index = build_faiss_index(embeddings)
     st.success("📦 Vector index created and ready.")
 
-    # 9) Q&A form
+    # Q&A input form
     with st.form(key="qa_form"):
         st.subheader("💬 Ask a Question About the Document")
-        user_question = st.text_input("Type your question here:")
+        user_question = st.text_input("Type your question:")
         ask_button = st.form_submit_button("Ask GPT")
 
         if ask_button and user_question:
             st.info("🔍 Searching relevant chunks and preparing answer...")
             relevant_chunks = search_index(user_question, index, chunks)
             answer = answer_question_with_gpt(user_question, relevant_chunks)
-            st.success("✅ Answer:")
-            st.write(answer)
+
+            if answer:
+                st.success("✅ Answer:")
+                st.write(answer)
+            else:
+                st.warning("⚠️ GPT returned an empty response. Please try again.")
+

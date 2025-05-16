@@ -43,8 +43,13 @@ Answer:"""
             temperature=0.3,
             max_tokens=500
         )
+
+        # Debug logs (will show in Streamlit Cloud logs)
+        print("🧪 Prompt sent to OpenAI:\n", prompt[:500])
+        print("🧪 GPT response:\n", response.choices[0].message.content.strip())
+
         return response.choices[0].message.content.strip()
 
     except Exception as e:
         print("🛑 OpenAI API Error:", e)
-        return "⚠️ Could not get a response from GPT. You may have exhausted your API quota or encountered a network issue."
+        return "⚠️ Could not get a response from GPT. Please check your API key or question."
