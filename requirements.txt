@@ -8,3 +8,5 @@ python-docx
 PyMuPDF
 sentence-transformers
 faiss-cpu
+streamlit
+requests
