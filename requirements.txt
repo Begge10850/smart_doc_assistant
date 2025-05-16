@@ -1,0 +1,10 @@
+streamlit
+boto3
+python-dotenv
+sentence-transformers
+faiss-cpu
+openai
+python-docx
+PyMuPDF
+sentence-transformers
+faiss-cpu
