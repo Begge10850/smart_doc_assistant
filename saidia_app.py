@@ -26,24 +26,33 @@ st.markdown("Upload a document, extract the text, and interact with it using sma
 with st.sidebar:
     st.header("📤 Upload Document")
 
-    # Define clear function
+    # Define a safe clearing function
     def clear_session():
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.session_state["should_rerun"] = True
+        keys_to_clear = [
+            "doc_ready",
+            "uploaded_file_name",
+            "uploaded_file_data",
+        ]
+        for key in keys_to_clear:
+            st.session_state.pop(key, None)
+        st.session_state._rerun_flag = True  # trigger rerun safely
 
-    # File uploader
+    # Upload logic
     uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
-    
-    # Process document
+
     if uploaded_file and st.button("🚀 Process Document"):
         st.session_state.doc_ready = True
         st.session_state.uploaded_file_name = uploaded_file.name
         st.session_state.uploaded_file_data = uploaded_file.read()
         st.experimental_rerun()
 
-    # Clear button using callback
     st.button("❌ Clear Document", on_click=clear_session)
+
+# Trigger rerun once state is cleared
+if st.session_state.get("_rerun_flag"):
+    del st.session_state["_rerun_flag"]
+    st.experimental_rerun()
+
 
 # Trigger rerun if flag is set
 if st.session_state.get("should_rerun"):
