@@ -6,13 +6,13 @@ from pdf2image import convert_from_path
 from PIL import Image
 import fitz  # PyMuPDF for annotation extraction
 import boto3
+import requests
 
 # ─── AWS CREDENTIALS ────────────────────────────────────────────────────────────
 try:
     aws_access_key = st.secrets["aws"]["AWS_ACCESS_KEY_ID"]
     aws_secret_key = st.secrets["aws"]["AWS_SECRET_ACCESS_KEY"]
 except Exception:
-    # Fallback for local .env use
     from dotenv import load_dotenv
     load_dotenv()
     aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
@@ -33,6 +33,23 @@ def download_file_from_s3(file_name, download_path):
     except Exception as e:
         print("Download error:", e)
         return False
+
+# ─── OCR.SPACE FALLBACK ─────────────────────────────────────────────────────────
+def extract_text_with_ocr_space(file_path):
+    try:
+        api_key = st.secrets["ocr_space"]["OCR_API_KEY"]
+        with open(file_path, 'rb') as f:
+            response = requests.post(
+                'https://api.ocr.space/parse/image',
+                files={'file': f},
+                data={'apikey': api_key, 'language': 'eng'}
+            )
+        result = response.json()
+        print("📡 OCR.Space fallback triggered...")
+        return result["ParsedResults"][0]["ParsedText"]
+    except Exception as e:
+        print("🛑 OCR.Space error:", e)
+        return ""
 
 # ─── ANNOTATION EXTRACTION FROM PDF ─────────────────────────────────────────────
 def extract_annotations_from_pdf(file_path):
@@ -71,13 +88,13 @@ def extract_text_from_pdf(file_path):
     except Exception as e:
         print("pdfplumber failed:", e)
 
-    # Step 2: Check if fallback needed (weak content)
+    # Step 2: Check if fallback needed
     text_word_count = len(text.strip().split())
     watermark_hits = text.lower().count("essaypro")
+
     if text_word_count < 100 or watermark_hits > 3:
-        print(f"⚠️ Low quality extract ({text_word_count} words, {watermark_hits} 'essaypro' hits) — skipping OCR fallback on Streamlit.")
-        # Note: We skip OCR here because actual OCR is handled externally via OCR.Space in saidia_app.py
-        text = ""
+        print(f"⚠️ Low quality extract ({text_word_count} words, {watermark_hits} 'essaypro' hits) — using OCR.Space fallback...")
+        text = extract_text_with_ocr_space(file_path)
 
     # Step 3: Merge annotations
     try:

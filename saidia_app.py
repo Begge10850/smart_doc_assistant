@@ -66,18 +66,35 @@ if uploaded_file and process_triggered:
                 st.success("📦 Vector index created and ready.")
 
                 # Q&A Section
+                                # Q&A Section
                 with st.form(key="qa_form"):
                     st.subheader("💬 Ask a Question About the Document")
                     user_question = st.text_input("Type your question:")
                     ask_button = st.form_submit_button("Ask GPT")
 
-                    if ask_button and user_question:
-                        st.info("🔍 Searching and generating answer...")
-                        relevant_chunks = search_index(user_question, index, chunks)
-                        answer = answer_question_with_gpt(user_question, relevant_chunks)
-
-                        if answer:
-                            st.success("✅ Answer:")
-                            st.write(answer)
+                    if ask_button:
+                        if not user_question.strip():
+                            st.warning("⚠️ Please enter a question.")
                         else:
-                            st.warning("⚠️ GPT returned no answer.")
+                            st.info("🔍 Searching and generating answer...")
+                            try:
+                                # Debug markers
+                                print("❓ Question submitted:", user_question)
+                                
+                                # FAISS search
+                                relevant_chunks = search_index(user_question, index, chunks)
+                                print("🔍 Top chunks found:", relevant_chunks[:1])
+
+                                # GPT answer
+                                answer = answer_question_with_gpt(user_question, relevant_chunks)
+                                print("✅ GPT response:", answer)
+
+                                if answer:
+                                    st.success("✅ Answer:")
+                                    st.write(answer)
+                                else:
+                                    st.warning("⚠️ GPT returned no content.")
+                            except Exception as e:
+                                print("🛑 Error during Q&A:", e)
+                                st.error(f"❌ An error occurred: {e}")
+
