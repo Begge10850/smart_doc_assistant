@@ -25,8 +25,10 @@ s3 = boto3.client(
 def upload_to_s3(file_data, file_name):
     try:
         file_buffer = BytesIO(file_data)
+        file_buffer.seek(0)  # ✅ Ensure pointer is at beginning
         s3.upload_fileobj(file_buffer, "smart-doc-assistant-saidia", file_name)
         return True
     except Exception as e:
         print("❌ S3 Upload Error:", e)
         return False
+

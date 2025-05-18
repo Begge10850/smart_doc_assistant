@@ -38,8 +38,10 @@ if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
 
     st.info(f"📁 File selected: `{uploaded_file.name}`")
 
-    # Upload to S3
-    result = upload_to_s3(st.session_state.uploaded_file_data, st.session_state.uploaded_file_name)
+    # Upload to S3 using a fresh buffer
+    file_buffer = BytesIO(st.session_state.uploaded_file_data)
+    result = upload_to_s3(file_buffer, st.session_state.uploaded_file_name)
+
     if not result:
         st.error("❌ Upload to S3 failed.")
     else:
