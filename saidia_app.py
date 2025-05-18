@@ -30,6 +30,13 @@ with st.sidebar:
         st.session_state.doc_ready = True
         st.session_state.uploaded_file_name = uploaded_file.name
         st.session_state.uploaded_file_data = uploaded_file.read()
+        
+    #Reset button
+    if st.button("❌ Clear Document"):
+        st.session_state.doc_ready = False
+        st.session_state.pop("uploaded_file_data", None)
+        st.session_state.pop("uploaded_file_name", None)
+        st.experimental_rerun()
 
 # ─── Main Workflow ───
 if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
@@ -80,7 +87,7 @@ if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
     with st.form(key="qa_form"):
         st.subheader("💬 Ask a Question About the Document")
         user_question = st.text_input("Type your question:")
-        ask_button = st.form_submit_button("Ask GPT")
+        ask_button = st.form_submit_button("Ask about this Document")
 
         if ask_button:
             if not user_question.strip():
