@@ -1,31 +1,24 @@
-# Streamlit web app
+# Streamlit app
 streamlit
 
-# AWS S3 upload/download
+# AWS S3 support
 boto3
 
-# Text extraction and parsing
+# Document parsing
 pdfplumber
 python-docx
-pymupdf  # for annotations
-pdf2image
+pymupdf  # for PDF annotations
 
-# OCR API support
+# OCR.Space API
 requests
 
-# Vectorization + search
+# Embeddings and similarity search
 sentence-transformers
-faiss-cpu  # for FAISS indexing
-scikit-learn
+faiss-cpu
 numpy
-scipy
 
-# GPT-based Q&A
-openai
+# GPT integration
+openai>=1.0.0
 
-# Utilities and compatibility
-python-dotenv  # for local .env support (optional)
-Pillow  # image processing (used by pdf2image)
-
-# Optional (you may already have)
-tqdm  # for progress bars (optional)
+# Optional local dev utilities
+python-dotenv  # optional: only used if st.secrets not available

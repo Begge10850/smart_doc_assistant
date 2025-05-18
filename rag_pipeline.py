@@ -2,8 +2,6 @@ import os
 import pdfplumber
 from docx import Document
 import streamlit as st
-from pdf2image import convert_from_path
-from PIL import Image
 import fitz  # PyMuPDF for annotation extraction
 import boto3
 import requests

@@ -12,13 +12,11 @@ except Exception:
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
 
+# Initialize OpenAI client
 client = OpenAI(api_key=api_key)
 
-# Confirm API loaded
-print("🔐 OpenAI key loaded:", api_key[:6] + "...")
-
-# Load embedding model
-model = SentenceTransformer("all-MiniLM-L6-v2")
+# Load shared embedding model (more accurate)
+model = SentenceTransformer("all-mpnet-base-v2")
 
 # FAISS vector search
 def search_index(user_question, index, chunks, top_k=3):
@@ -27,12 +25,12 @@ def search_index(user_question, index, chunks, top_k=3):
     matched_chunks = [chunks[i] for i in I[0]]
     return matched_chunks
 
-# Ask GPT using new client format
+# Ask GPT using OpenAI client
 def answer_question_with_gpt(question, context_chunks):
     prompt = f"""You are a helpful assistant. Use the following document snippets to answer the user's question.
 
 Document Snippets:
-{''.join(['- ' + chunk + '\\n' for chunk in context_chunks])}
+{''.join(['- ' + chunk + '\n' for chunk in context_chunks])}
 
 Question: {question}
 Answer:"""
@@ -44,9 +42,6 @@ Answer:"""
             temperature=0.3,
             max_tokens=500
         )
-
-        print("🧪 Prompt sent:", prompt[:400])
-        print("🧪 GPT response:", response.choices[0].message.content[:300])
 
         return response.choices[0].message.content.strip()
 
