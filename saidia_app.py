@@ -12,6 +12,10 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
+# ─── Initialize session state ───
+if "doc_ready" not in st.session_state:
+    st.session_state.doc_ready = False
+
 # ─── Page Setup ───
 st.set_page_config(page_title="📄 Saidia Smart Document Assistant", layout="wide")
 st.title("📄 Saidia Smart Document Assistant")
@@ -21,10 +25,13 @@ st.markdown("Upload a document, extract the text, and interact with it using sma
 with st.sidebar:
     st.header("📤 Upload Document")
     uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
-    process_triggered = st.button("🚀 Process Document")
+    if uploaded_file and st.button("🚀 Process Document"):
+        st.session_state.doc_ready = True
+        st.session_state.uploaded_file = uploaded_file
 
 # ─── Main Workflow ───
-if uploaded_file and process_triggered:
+if st.session_state.doc_ready and "uploaded_file" in st.session_state:
+    uploaded_file = st.session_state.uploaded_file
     st.info(f"📁 File selected: `{uploaded_file.name}` ({uploaded_file.type})")
 
     # Upload to S3
@@ -66,7 +73,6 @@ if uploaded_file and process_triggered:
                 st.success("📦 Vector index created and ready.")
 
                 # Q&A Section
-                                # Q&A Section
                 with st.form(key="qa_form"):
                     st.subheader("💬 Ask a Question About the Document")
                     user_question = st.text_input("Type your question:")
@@ -78,23 +84,16 @@ if uploaded_file and process_triggered:
                         else:
                             st.info("🔍 Searching and generating answer...")
                             try:
-                                # Debug markers
                                 print("❓ Question submitted:", user_question)
-                                
-                                # FAISS search
                                 relevant_chunks = search_index(user_question, index, chunks)
                                 print("🔍 Top chunks found:", relevant_chunks[:1])
-
-                                # GPT answer
                                 answer = answer_question_with_gpt(user_question, relevant_chunks)
                                 print("✅ GPT response:", answer)
-
                                 if answer:
                                     st.success("✅ Answer:")
                                     st.write(answer)
                                 else:
-                                    st.warning("⚠️ GPT returned no content.")
+                                    st.warning("⚠️ GPT returned no answer.")
                             except Exception as e:
                                 print("🛑 Error during Q&A:", e)
                                 st.error(f"❌ An error occurred: {e}")
-
