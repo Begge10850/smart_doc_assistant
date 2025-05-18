@@ -31,11 +31,9 @@ with st.sidebar:
         st.session_state.uploaded_file_name = uploaded_file.name
         st.session_state.uploaded_file_data = uploaded_file.read()
 
-    # Reset button
     if st.button("❌ Clear Document"):
-        st.session_state.doc_ready = False
-        st.session_state.pop("uploaded_file_data", None)
-        st.session_state.pop("uploaded_file_name", None)
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.experimental_rerun()
 
 
