@@ -26,23 +26,29 @@ st.markdown("Upload a document, extract the text, and interact with it using sma
 with st.sidebar:
     st.header("📤 Upload Document")
 
-    if not st.session_state.get("doc_ready", False):
-        uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
+    # Define clear function
+    def clear_session():
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.session_state["should_rerun"] = True
 
-        if uploaded_file and st.button("🚀 Process Document"):
-            st.session_state.doc_ready = True
-            st.session_state.uploaded_file_name = uploaded_file.name
-            st.session_state.uploaded_file_data = uploaded_file.read()
-            st.experimental_rerun()  # Refresh to update the UI
+    # File uploader
+    uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
+    
+    # Process document
+    if uploaded_file and st.button("🚀 Process Document"):
+        st.session_state.doc_ready = True
+        st.session_state.uploaded_file_name = uploaded_file.name
+        st.session_state.uploaded_file_data = uploaded_file.read()
+        st.experimental_rerun()
 
-    else:
-        st.info(f"Processing: {st.session_state.get('uploaded_file_name', 'Document')}")
+    # Clear button using callback
+    st.button("❌ Clear Document", on_click=clear_session)
 
-        if st.button("❌ Clear Document"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.experimental_rerun()
-
+# Trigger rerun if flag is set
+if st.session_state.get("should_rerun"):
+    del st.session_state["should_rerun"]
+    st.experimental_rerun()
 
 
 # ─── Main Workflow ───
