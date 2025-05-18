@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import asyncio
+from io import BytesIO
 from s3_upload import upload_to_s3
 from rag_pipeline import download_file_from_s3, extract_text_from_file
 from vector_store import chunk_text, embed_chunks, build_faiss_index
@@ -27,15 +28,18 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
     if uploaded_file and st.button("🚀 Process Document"):
         st.session_state.doc_ready = True
-        st.session_state.uploaded_file = uploaded_file
+        st.session_state.uploaded_file_name = uploaded_file.name
+        st.session_state.uploaded_file_data = uploaded_file.read()
 
 # ─── Main Workflow ───
-if st.session_state.doc_ready and "uploaded_file" in st.session_state:
-    uploaded_file = st.session_state.uploaded_file
-    st.info(f"📁 File selected: `{uploaded_file.name}` ({uploaded_file.type})")
+if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
+    uploaded_file = BytesIO(st.session_state.uploaded_file_data)
+    uploaded_file.name = st.session_state.uploaded_file_name
+
+    st.info(f"📁 File selected: `{uploaded_file.name}`")
 
     # Upload to S3
-    result = upload_to_s3(uploaded_file)
+    result = upload_to_s3(st.session_state.uploaded_file_data, st.session_state.uploaded_file_name)
     if not result:
         st.error("❌ Upload to S3 failed.")
     else:
@@ -51,7 +55,7 @@ if st.session_state.doc_ready and "uploaded_file" in st.session_state:
 
             # Extract text
             extracted_text = extract_text_from_file(local_path)
-            st.success(f"🧾 Extracted DOCX content length: {len(extracted_text)} characters")
+            st.success(f"🧾 Extracted text length: {len(extracted_text)} characters")
 
             if not extracted_text.strip():
                 st.warning("⚠️ No text extracted.")
