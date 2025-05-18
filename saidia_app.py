@@ -34,31 +34,21 @@ with st.sidebar:
             "uploaded_file_data",
         ]
         for key in keys_to_clear:
-            st.session_state.pop(key, None)
-        st.session_state._rerun_flag = True  # trigger rerun safely
+            if key in st.session_state:
+                del st.session_state[key]
+        # No need for rerun flag - this will automatically trigger a rerun
 
     # Upload logic
     uploaded_file = st.file_uploader("Choose a .pdf, .txt, or .docx file", type=["pdf", "txt", "docx"])
 
-    if uploaded_file and st.button("🚀 Process Document"):
+    if uploaded_file and st.button("🚀 Process Document", key="process_btn"):
         st.session_state.doc_ready = True
         st.session_state.uploaded_file_name = uploaded_file.name
         st.session_state.uploaded_file_data = uploaded_file.read()
-        st.experimental_rerun()
+        st.rerun()  # Use st.rerun() instead of st.experimental_rerun()
 
-    st.button("❌ Clear Document", on_click=clear_session)
-
-# Trigger rerun once state is cleared
-if st.session_state.get("_rerun_flag"):
-    del st.session_state["_rerun_flag"]
-    st.experimental_rerun()
-
-
-# Trigger rerun if flag is set
-if st.session_state.get("should_rerun"):
-    del st.session_state["should_rerun"]
-    st.experimental_rerun()
-
+    # Clear button with callback 
+    st.button("❌ Clear Document", on_click=clear_session, key="clear_btn")
 
 # ─── Main Workflow ───
 if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
