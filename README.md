@@ -2,23 +2,23 @@
 
 Saidia is a secure, GPT-powered document assistant that allows users to upload documents, process them privately, and ask natural language questions — all within a clean, private, and user-friendly web app.
 
-![Saidia Smart Assistant Home Page](home_page.png)
+![Saidia Smart Assistant Home Page](Images/home_page.png)
 
-![Saidia Smart Assistant App in action](app_in_action.png)
+![Saidia Smart Assistant App in action](Images/app_in_action.png)
 
-![Saidia Smart Assistant App results](result.png)
+![Saidia Smart Assistant App results](Images/result.png)
 
 ---
 
 ## 🚀 Features
 
-- 🔒 **Secure Document Upload** — Files are stored in your own AWS S3 bucket
+- 🔒 **Secure Document Upload** — Files are stored in AWS S3 bucket
 - 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
 - 📄 **Supported File Types** — PDF, DOCX, and TXT
 - 🧾 **Text Extraction** — Extracts and processes document content with fallback to OCR.Space if needed
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
-- ☁️ **Streamlit Cloud Ready** — Fully deployable on [streamlit.io](https://streamlit.io)
+- ☁️ **Streamlit Cloud Ready** — Fully deployed on [streamlit.io]([https://streamlit.io](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/))
 
 ---
 
