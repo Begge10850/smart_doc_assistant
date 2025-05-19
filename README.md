@@ -55,20 +55,13 @@ This assistant is ideal for:
 
 ## 📦 Folder Structure
 .
-├── saidia_app.py   # Main Streamlit app
-
-├── rag_pipeline.py         # Handles text extraction + OCR
-
-├── s3_upload.py            # Uploads file to AWS S3
-
-├── vector_store.py         # Chunking + FAISS index
-
-├── qa_engine.py            # GPT Q&A engine
-
-├── requirements.txt
-
-└── .streamlit/
-    └── secrets.toml        # Your private keys
+| saidia_app.py         | Main Streamlit app                   |
+|-----------------------|--------------------------------------|
+| rag_pipeline.py       | Handles text extraction + OCR        |
+| s3_upload.py          | Uploads file to AWS S3               |
+| vector_store.py       | Chunking + FAISS index               |
+| qa_engine.py          | GPT Q&A engine                       |
+| requirements.txt      | .streamlit/-secrets.toml-Private Keys|
 
 📌 Notes
 - This app uses OpenAI’s API securely; only document chunks are sent for answering questions.
