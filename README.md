@@ -2,11 +2,11 @@
 
 Saidia is a secure, GPT-powered document assistant that allows users to upload documents, process them privately, and ask natural language questions — all within a clean, private, and user-friendly web app.
 
-![Saidia Smart Assistant Home Page](Images/home_page.png)
+![Saidia Smart Assistant Home Page](Images/home_page.PNG)
 
-![Saidia Smart Assistant App in action](Images/app_in_action.png)
+![Saidia Smart Assistant App in action](Images/app_in_action.PNG)
 
-![Saidia Smart Assistant App results](Images/result.png)
+![Saidia Smart Assistant App results](Images/result.PNG)
 
 ---
 
