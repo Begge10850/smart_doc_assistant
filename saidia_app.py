@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import asyncio
 from io import BytesIO
-from s3_upload import upload_to_s3
+from s3_upload import S3UploadError, upload_to_s3
 from rag_pipeline import download_file_from_s3, extract_text_from_file
 from vector_store import chunk_text, embed_chunks, build_faiss_index
 from qa_engine import search_index, answer_question_with_gpt
@@ -57,11 +57,19 @@ if st.session_state.doc_ready and "uploaded_file_data" in st.session_state:
     st.info(f"📁 File selected: `{uploaded_file.name}`")
 
     # Upload to S3
-    result = upload_to_s3(st.session_state.uploaded_file_data, st.session_state.uploaded_file_name)
-    if not result:
-        st.error("❌ Upload to S3 failed.")
+    try:
+        s3_object_key = upload_to_s3(
+            st.session_state.uploaded_file_data,
+            st.session_state.uploaded_file_name,
+        )
+    except S3UploadError as exc:
+        st.error(f"❌ Upload to S3 failed: {exc}")
+        st.info(
+            "Check the Streamlit AWS secrets, the eu-north-1 region, and the "
+            "IAM permissions for the smart-doc-assistant-saidia bucket."
+        )
         st.stop()
-    st.success("✅ Uploaded to S3")
+    st.success(f"✅ Uploaded `{s3_object_key}` to S3")
 
     # Download to temp folder
     local_path = os.path.join("temp", uploaded_file.name)
