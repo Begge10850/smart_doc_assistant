@@ -1,4 +1,4 @@
-from qa_engine import model
+from qa_engine import get_embedding_model
 import faiss
 import numpy as np
 import re
@@ -16,6 +16,7 @@ def chunk_text(text, chunk_size=300, overlap=50):
 
 # Embed the chunks into vector space
 def embed_chunks(chunks):
+    model = get_embedding_model()
     embeddings = model.encode(chunks)
     return np.array(embeddings)
 

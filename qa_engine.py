@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 import streamlit as st
 
@@ -15,11 +14,18 @@ except Exception:
 # Initialize OpenAI client
 client = OpenAI(api_key=api_key)
 
-# Load shared embedding model (more accurate)
-model = SentenceTransformer("all-mpnet-base-v2")
+# Load the shared embedding model only when document search first needs it.
+# Streamlit then reuses the same model for later reruns and questions while
+# the app process remains active.
+@st.cache_resource(show_spinner="Loading document search model...")
+def get_embedding_model():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer("all-mpnet-base-v2")
 
 # FAISS vector search
 def search_index(user_question, index, chunks, top_k=3):
+    model = get_embedding_model()
     question_embedding = model.encode([user_question])
     D, I = index.search(np.array(question_embedding), top_k)
     matched_chunks = [chunks[i] for i in I[0]]
