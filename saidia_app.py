@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from qa_engine import answer_question_with_gpt, search_index
+from agent_engine import DocumentAgentError, run_document_agent
 from rag_pipeline import (
     VisionConsentRequired,
     download_file_from_s3,
@@ -50,14 +50,16 @@ def reset_vision_consent():
     st.session_state.pop("vision_consent_doc_hash", None)
 
 
-def retrieval_query(question, history):
-    """Include recent user turns so follow-up questions retrieve useful chunks."""
-    recent_user_turns = [
-        message["content"]
-        for message in history[-6:]
-        if message.get("role") == "user"
-    ]
-    return "\n".join([*recent_user_turns[-2:], question])
+def render_agent_trace(tool_trace):
+    """Show which read-only tools the document agent selected."""
+    if not tool_trace:
+        return
+
+    with st.expander("🧰 Agent activity", expanded=False):
+        for step_number, step in enumerate(tool_trace, start=1):
+            st.markdown(
+                f"**{step_number}. `{step['tool']}`** — {step['summary']}"
+            )
 
 
 st.set_page_config(page_title="Saidia Smart Document Assistant", layout="wide")
@@ -224,6 +226,7 @@ if st.session_state.get("processed_doc_hash"):
     for message in chat_messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            render_agent_trace(message.get("tool_trace"))
 
     question = st.chat_input("Ask a question about the document")
     if question:
@@ -234,23 +237,30 @@ if st.session_state.get("processed_doc_hash"):
             st.markdown(question)
 
         with st.chat_message("assistant"):
-            with st.spinner("Searching the document and preparing an answer..."):
+            with st.spinner("The document agent is deciding what to inspect..."):
                 try:
-                    search_query = retrieval_query(question, prior_history)
-                    relevant_chunks = search_index(
-                        search_query,
-                        vector_index,
-                        chunks,
-                    )
-                    answer = answer_question_with_gpt(
+                    agent_result = run_document_agent(
                         question,
-                        relevant_chunks,
+                        file_name=file_name,
+                        document_metadata=document_metadata,
+                        vector_index=vector_index,
+                        chunks=chunks,
                         chat_history=prior_history,
                     )
-                except Exception as exc:
+                    answer = agent_result["answer"]
+                    tool_trace = agent_result["tool_trace"]
+                except DocumentAgentError as exc:
                     answer = f"I could not answer that question: {exc}"
+                    tool_trace = []
 
             st.markdown(answer)
-            chat_messages.append({"role": "assistant", "content": answer})
+            render_agent_trace(tool_trace)
+            chat_messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "tool_trace": tool_trace,
+                }
+            )
 else:
     st.info("Upload a document and select **Process Document** to begin.")

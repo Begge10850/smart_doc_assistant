@@ -24,6 +24,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and consent-gated OpenAI vision for images and scanned PDFs
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
+- 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
 ---
@@ -60,6 +61,7 @@ This assistant is ideal for:
 | s3_upload.py          | Uploads file to AWS S3               |
 | vector_store.py       | Chunking + FAISS index               |
 | qa_engine.py          | GPT Q&A engine                       |
+| agent_engine.py       | Bounded read-only document agent and tool controller |
 | vision_engine.py      | Consent-gated OpenAI image transcription |
 | requirements.txt      | .streamlit/-secrets.toml-Private Keys|
 
@@ -69,6 +71,8 @@ This assistant is ideal for:
 - Images and rendered pages from scanned PDFs are sent to OpenAI vision only after explicit user consent.
 
 - Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
+
+- The agent can only inspect metadata and search already-processed content. Its tools cannot modify files, delete objects, send messages, or perform external actions.
 
 ## 🔑 API Access Keys Required for the application.
 
