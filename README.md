@@ -20,8 +20,8 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 
 - 🔒 **Secure Document Upload** — Files are stored in AWS S3 bucket
 - 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
-- 📄 **Supported File Types** — PDF, DOCX, and TXT
-- 🧾 **Text Extraction** — Extracts and processes document content with fallback to OCR.Space if needed
+- 📄 **Supported File Types** — PDF, DOCX, TXT, JPG, JPEG, and PNG
+- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and consent-gated OpenAI vision for images and scanned PDFs
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
@@ -44,11 +44,10 @@ This assistant is ideal for:
 |-----------------------|-------------------------------------|
 | `streamlit`           | Frontend UI                         |
 | `boto3`               | AWS S3 storage                      |
-| `pdfplumber`, `docx`, `PyMuPDF` | Text + annotation extraction |
-| `requests`            | OCR.Space API fallback              |
+| `pdfplumber`, `docx`, `PyMuPDF` | Text, annotation, image, and scanned-PDF preparation |
 | `sentence-transformers` | Text embeddings                   |
 | `faiss-cpu`           | Vector search                       |
-| `openai`              | GPT-3.5-turbo API                   |
+| `openai`              | Document Q&A and consent-gated vision transcription |
 | `python-dotenv`       | Local environment setup (optional)  |
 
 ---
@@ -57,18 +56,19 @@ This assistant is ideal for:
 .
 | saidia_app.py         | Main Streamlit app                   |
 |-----------------------|--------------------------------------|
-| rag_pipeline.py       | Handles text extraction + OCR        |
+| rag_pipeline.py       | Inspects files and selects local or vision extraction |
 | s3_upload.py          | Uploads file to AWS S3               |
 | vector_store.py       | Chunking + FAISS index               |
 | qa_engine.py          | GPT Q&A engine                       |
+| vision_engine.py      | Consent-gated OpenAI image transcription |
 | requirements.txt      | .streamlit/-secrets.toml-Private Keys|
 
 📌 Notes
-- This app uses OpenAI’s API securely; only document chunks are sent for answering questions.
+- For digital documents, only retrieved document chunks are sent to OpenAI when answering questions.
 
-- OCR fallback ensures even scanned PDFs can be processed.
+- Images and rendered pages from scanned PDFs are sent to OpenAI vision only after explicit user consent.
 
-- All files stay private within your AWS S3 bucket.
+- Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
 
 ## 🔑 API Access Keys Required for the application.
 
@@ -78,9 +78,6 @@ This assistant is ideal for:
 
 ## [openai]
 - OPENAI_API_KEY = "your_openai_api_key"
-
-## [ocr_space]
-- OCR_API_KEY = "your_ocr_space_api_key"
 
 ## 🙌 Credits
 - Created by Treva Ogwang

@@ -9,9 +9,6 @@ pdfplumber
 python-docx
 pymupdf  # for PDF annotations
 
-# OCR.Space API
-requests
-
 # Embeddings and similarity search
 sentence-transformers
 faiss-cpu

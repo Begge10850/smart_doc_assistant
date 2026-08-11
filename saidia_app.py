@@ -6,7 +6,11 @@ from pathlib import Path
 import streamlit as st
 
 from qa_engine import answer_question_with_gpt, search_index
-from rag_pipeline import download_file_from_s3, extract_text_from_file
+from rag_pipeline import (
+    VisionConsentRequired,
+    download_file_from_s3,
+    process_document,
+)
 from s3_upload import S3UploadError, upload_to_s3
 from vector_store import build_faiss_index, chunk_text, embed_chunks
 
@@ -22,10 +26,12 @@ DOCUMENT_STATE_KEYS = [
     "processing_requested",
     "uploaded_file_name",
     "uploaded_file_data",
+    "vision_consent_doc_hash",
     "processed_doc_hash",
     "processed_file_name",
     "s3_object_key",
     "extracted_text",
+    "document_metadata",
     "chunks",
     "vector_index",
     "chat_messages",
@@ -36,6 +42,12 @@ def clear_document_session():
     """Forget the processed document, vector index, and its conversation."""
     for key in DOCUMENT_STATE_KEYS:
         st.session_state.pop(key, None)
+
+
+def reset_vision_consent():
+    """Require fresh consent whenever the selected upload changes."""
+    st.session_state.vision_disclosure_consent = False
+    st.session_state.pop("vision_consent_doc_hash", None)
 
 
 def retrieval_query(question, history):
@@ -58,8 +70,19 @@ st.markdown(
 with st.sidebar:
     st.header("📤 Upload Document")
     uploaded_file = st.file_uploader(
-        "Choose a .pdf, .txt, or .docx file",
-        type=["pdf", "txt", "docx"],
+        "Choose a PDF, DOCX, TXT, JPG, JPEG, or PNG file",
+        type=["pdf", "txt", "docx", "jpg", "jpeg", "png"],
+        on_change=reset_vision_consent,
+    )
+
+    vision_consent = st.checkbox(
+        "I understand that images or scanned PDF pages may be sent to "
+        "OpenAI for vision-based text extraction.",
+        key="vision_disclosure_consent",
+        help=(
+            "This is required for JPG, JPEG, PNG, and scanned PDFs. "
+            "Digital PDFs, DOCX, and TXT files continue to use local text extraction."
+        ),
     )
 
     if uploaded_file and st.button("🚀 Process Document", key="process_btn"):
@@ -75,6 +98,8 @@ with st.sidebar:
             clear_document_session()
             st.session_state.uploaded_file_name = Path(uploaded_file.name).name
             st.session_state.uploaded_file_data = file_data
+            if vision_consent:
+                st.session_state.vision_consent_doc_hash = document_hash
             st.session_state.processing_requested = True
             st.rerun()
 
@@ -91,6 +116,9 @@ if st.session_state.get("processing_requested"):
     file_name = st.session_state.uploaded_file_name
     file_data = st.session_state.uploaded_file_data
     document_hash = hashlib.sha256(file_data).hexdigest()
+    vision_consent = (
+        st.session_state.get("vision_consent_doc_hash") == document_hash
+    )
 
     st.info(f"📁 Processing `{file_name}` for the first time in this session.")
 
@@ -106,8 +134,13 @@ if st.session_state.get("processing_requested"):
             if not download_file_from_s3(s3_object_key, local_path):
                 raise RuntimeError("The document could not be downloaded from S3.")
 
-            status.write("Extracting text...")
-            extracted_text = extract_text_from_file(local_path)
+            status.write("Inspecting the file and selecting an extraction method...")
+            processing_result = process_document(
+                local_path,
+                vision_consent=vision_consent,
+            )
+            extracted_text = processing_result["text"]
+            document_metadata = processing_result["metadata"]
             if not extracted_text.strip():
                 raise RuntimeError("No text could be extracted from the document.")
 
@@ -123,6 +156,7 @@ if st.session_state.get("processing_requested"):
             st.session_state.processed_file_name = file_name
             st.session_state.s3_object_key = s3_object_key
             st.session_state.extracted_text = extracted_text
+            st.session_state.document_metadata = document_metadata
             st.session_state.chunks = chunks
             st.session_state.vector_index = vector_index
             st.session_state.chat_messages = []
@@ -135,6 +169,14 @@ if st.session_state.get("processing_requested"):
         st.session_state.processing_requested = False
         st.error(f"❌ Upload to S3 failed: {exc}")
         st.stop()
+    except VisionConsentRequired:
+        st.session_state.processing_requested = False
+        st.warning(
+            "This file requires OpenAI vision. Select the consent checkbox in "
+            "the sidebar, then choose **Process Document** again. No image or "
+            "scanned page was sent to OpenAI."
+        )
+        st.stop()
     except Exception as exc:
         st.session_state.processing_requested = False
         st.error(f"❌ Document processing failed: {exc}")
@@ -144,14 +186,25 @@ if st.session_state.get("processing_requested"):
 if st.session_state.get("processed_doc_hash"):
     file_name = st.session_state.processed_file_name
     extracted_text = st.session_state.extracted_text
+    document_metadata = st.session_state.document_metadata
     chunks = st.session_state.chunks
     vector_index = st.session_state.vector_index
     chat_messages = st.session_state.setdefault("chat_messages", [])
 
     st.success(f"✅ `{file_name}` is processed and cached for this session.")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     col1.metric("Extracted characters", f"{len(extracted_text):,}")
     col2.metric("Searchable chunks", len(chunks))
+    col3.metric(
+        "Extraction method",
+        document_metadata["extraction_method"].replace("_", " ").title(),
+    )
+
+    if document_metadata.get("used_vision"):
+        st.caption(
+            "OpenAI vision was used—with your consent—to transcribe this "
+            "image-based document."
+        )
 
     with st.expander("🧠 Preview extracted text", expanded=False):
         st.text_area(
