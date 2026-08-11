@@ -78,6 +78,8 @@ This assistant is ideal for:
 
 ## [openai]
 - OPENAI_API_KEY = "your_openai_api_key"
+- QA_MODEL = "gpt-5.6-sol" # optional override
+- VISION_MODEL = "gpt-5.6-sol" # optional override
 
 ## 🙌 Credits
 - Created by Treva Ogwang
