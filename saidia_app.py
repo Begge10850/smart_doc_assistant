@@ -7,7 +7,6 @@ import streamlit as st
 
 from agent_engine import DocumentAgentError, run_document_agent
 from rag_pipeline import (
-    VisionConsentRequired,
     download_file_from_s3,
     process_document,
 )
@@ -26,7 +25,6 @@ DOCUMENT_STATE_KEYS = [
     "processing_requested",
     "uploaded_file_name",
     "uploaded_file_data",
-    "vision_consent_doc_hash",
     "processed_doc_hash",
     "processed_file_name",
     "s3_object_key",
@@ -42,12 +40,6 @@ def clear_document_session():
     """Forget the processed document, vector index, and its conversation."""
     for key in DOCUMENT_STATE_KEYS:
         st.session_state.pop(key, None)
-
-
-def reset_vision_consent():
-    """Require fresh consent whenever the selected upload changes."""
-    st.session_state.vision_disclosure_consent = False
-    st.session_state.pop("vision_consent_doc_hash", None)
 
 
 def render_agent_trace(tool_trace):
@@ -74,17 +66,11 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "Choose a PDF, DOCX, TXT, JPG, JPEG, or PNG file",
         type=["pdf", "txt", "docx", "jpg", "jpeg", "png"],
-        on_change=reset_vision_consent,
     )
 
-    vision_consent = st.checkbox(
-        "I understand that images or scanned PDF pages may be sent to "
-        "OpenAI for vision-based text extraction.",
-        key="vision_disclosure_consent",
-        help=(
-            "This is required for JPG, JPEG, PNG, and scanned PDFs. "
-            "Digital PDFs, DOCX, and TXT files continue to use local text extraction."
-        ),
+    st.caption(
+        "Images and scanned PDFs are automatically processed with OpenAI "
+        "Vision when native text is unavailable."
     )
 
     if uploaded_file and st.button("🚀 Process Document", key="process_btn"):
@@ -100,8 +86,6 @@ with st.sidebar:
             clear_document_session()
             st.session_state.uploaded_file_name = Path(uploaded_file.name).name
             st.session_state.uploaded_file_data = file_data
-            if vision_consent:
-                st.session_state.vision_consent_doc_hash = document_hash
             st.session_state.processing_requested = True
             st.rerun()
 
@@ -118,9 +102,6 @@ if st.session_state.get("processing_requested"):
     file_name = st.session_state.uploaded_file_name
     file_data = st.session_state.uploaded_file_data
     document_hash = hashlib.sha256(file_data).hexdigest()
-    vision_consent = (
-        st.session_state.get("vision_consent_doc_hash") == document_hash
-    )
 
     st.info(f"📁 Processing `{file_name}` for the first time in this session.")
 
@@ -137,10 +118,7 @@ if st.session_state.get("processing_requested"):
                 raise RuntimeError("The document could not be downloaded from S3.")
 
             status.write("Inspecting the file and selecting an extraction method...")
-            processing_result = process_document(
-                local_path,
-                vision_consent=vision_consent,
-            )
+            processing_result = process_document(local_path)
             extracted_text = processing_result["text"]
             document_metadata = processing_result["metadata"]
             if not extracted_text.strip():
@@ -171,14 +149,6 @@ if st.session_state.get("processing_requested"):
         st.session_state.processing_requested = False
         st.error(f"❌ Upload to S3 failed: {exc}")
         st.stop()
-    except VisionConsentRequired:
-        st.session_state.processing_requested = False
-        st.warning(
-            "This file requires OpenAI vision. Select the consent checkbox in "
-            "the sidebar, then choose **Process Document** again. No image or "
-            "scanned page was sent to OpenAI."
-        )
-        st.stop()
     except Exception as exc:
         st.session_state.processing_requested = False
         st.error(f"❌ Document processing failed: {exc}")
@@ -204,8 +174,8 @@ if st.session_state.get("processed_doc_hash"):
 
     if document_metadata.get("used_vision"):
         st.caption(
-            "OpenAI vision was used—with your consent—to transcribe this "
-            "image-based document."
+            "OpenAI Vision was selected automatically because this document "
+            "did not contain enough usable native text."
         )
 
     with st.expander("🧠 Preview extracted text", expanded=False):

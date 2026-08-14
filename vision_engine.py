@@ -12,10 +12,6 @@ class VisionProcessingError(RuntimeError):
     """A safe vision-processing error that can be shown to an app user."""
 
 
-class VisionConsentRequired(VisionProcessingError):
-    """Raised before document image data can be transmitted to OpenAI."""
-
-
 class NoReadableTextError(VisionProcessingError):
     """Raised when vision succeeds but an image contains no readable text."""
 
@@ -45,15 +41,9 @@ def extract_text_from_image_bytes(
     image_bytes,
     mime_type,
     *,
-    consent_granted=False,
     page_label="Image",
 ):
-    """Use OpenAI vision to transcribe one explicitly approved image."""
-    if consent_granted is not True:
-        raise VisionConsentRequired(
-            "Explicit consent is required before sending an image to OpenAI."
-        )
-
+    """Use OpenAI Vision to transcribe one image-based document page."""
     if not image_bytes:
         raise VisionProcessingError("The image contains no data.")
 

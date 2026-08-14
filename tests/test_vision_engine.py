@@ -31,15 +31,15 @@ vision_engine = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(vision_engine)
 
 
-class VisionConsentTests(unittest.TestCase):
-    def test_image_data_is_rejected_without_explicit_consent(self):
-        with self.assertRaises(vision_engine.VisionConsentRequired):
+class VisionExtractionTests(unittest.TestCase):
+    def test_empty_image_data_is_rejected_before_openai_is_called(self):
+        with self.assertRaises(vision_engine.VisionProcessingError):
             vision_engine.extract_text_from_image_bytes(
-                b"not-a-real-image",
+                b"",
                 "image/png",
             )
 
-    def test_consented_image_uses_the_configured_model(self):
+    def test_image_uses_the_configured_model_automatically(self):
         captured_request = {}
 
         class FakeResponses:
@@ -61,7 +61,6 @@ class VisionConsentTests(unittest.TestCase):
             result = vision_engine.extract_text_from_image_bytes(
                 b"not-a-real-image",
                 "image/png",
-                consent_granted=True,
             )
 
         self.assertEqual(result, "Transcribed document text")

@@ -9,7 +9,6 @@ import boto3
 
 from vision_engine import (
     NoReadableTextError,
-    VisionConsentRequired,
     VisionProcessingError,
     extract_text_from_image_bytes,
 )
@@ -24,7 +23,7 @@ SUPPORTED_FILE_EXTENSIONS = {
     ".jpeg",
 }
 IMAGE_FILE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
-PDF_NATIVE_TEXT_MIN_WORDS = 100
+PDF_NATIVE_TEXT_MIN_CHARACTERS = 40
 MAX_VISION_PDF_PAGES = 20
 
 
@@ -125,26 +124,20 @@ def inspect_document(file_path):
 
 
 # ─── OPENAI VISION EXTRACTION ────────────────────────────────────────────────
-def extract_image_with_vision(file_path, *, consent_granted=False):
-    """Send one image to OpenAI vision only after explicit user consent."""
+def extract_image_with_vision(file_path):
+    """Use OpenAI Vision to transcribe one uploaded image."""
     path = Path(file_path)
     mime_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
 
     return extract_text_from_image_bytes(
         path.read_bytes(),
         mime_type,
-        consent_granted=consent_granted,
         page_label=path.name,
     )
 
 
-def extract_scanned_pdf_with_vision(file_path, *, consent_granted=False):
-    """Render and transcribe consented scanned-PDF pages with OpenAI vision."""
-    if consent_granted is not True:
-        raise VisionConsentRequired(
-            "Explicit consent is required before sending scanned pages to OpenAI."
-        )
-
+def extract_scanned_pdf_with_vision(file_path):
+    """Render and transcribe scanned-PDF pages with OpenAI Vision."""
     page_texts = []
 
     try:
@@ -164,7 +157,6 @@ def extract_scanned_pdf_with_vision(file_path, *, consent_granted=False):
                     page_text = extract_text_from_image_bytes(
                         pixmap.tobytes("png"),
                         "image/png",
-                        consent_granted=consent_granted,
                         page_label=f"page {page_number}",
                     )
                 except NoReadableTextError:
@@ -226,17 +218,14 @@ def _extract_native_pdf_text(file_path):
     return "\n\n".join(page_texts)
 
 
-def _process_pdf(file_path, *, vision_consent=False):
+def _process_pdf(file_path):
     text = _extract_native_pdf_text(file_path)
     native_word_count = len(text.split())
-    watermark_hits = text.lower().count("essaypro")
-    appears_scanned = native_word_count < PDF_NATIVE_TEXT_MIN_WORDS
+    native_character_count = len("".join(text.split()))
+    appears_scanned = native_character_count < PDF_NATIVE_TEXT_MIN_CHARACTERS
 
-    if appears_scanned or watermark_hits > 3:
-        text = extract_scanned_pdf_with_vision(
-            file_path,
-            consent_granted=vision_consent,
-        )
+    if appears_scanned:
+        text = extract_scanned_pdf_with_vision(file_path)
         extraction_method = "openai_vision"
     else:
         extraction_method = "native_pdf"
@@ -253,18 +242,36 @@ def _process_pdf(file_path, *, vision_consent=False):
         "used_vision": extraction_method == "openai_vision",
         "appears_scanned": appears_scanned,
         "native_word_count": native_word_count,
-        "watermark_hits": watermark_hits,
+        "native_character_count": native_character_count,
     }
 
 
-def extract_text_from_pdf(file_path, *, vision_consent=False):
+def extract_text_from_pdf(file_path):
     """Compatibility wrapper that returns only extracted PDF text."""
-    text, _ = _process_pdf(file_path, vision_consent=vision_consent)
+    text, _ = _process_pdf(file_path)
     return text
 
 
+def _extract_docx_text(file_path):
+    """Extract ordinary paragraphs and table rows from a Word document."""
+    document = Document(file_path)
+    text_parts = [
+        paragraph.text.strip()
+        for paragraph in document.paragraphs
+        if paragraph.text.strip()
+    ]
+
+    for table in document.tables:
+        for row in table.rows:
+            cell_values = [cell.text.strip() for cell in row.cells]
+            if any(cell_values):
+                text_parts.append(" | ".join(cell_values))
+
+    return "\n".join(text_parts)
+
+
 # ─── MAIN HANDLER ───────────────────────────────────────────────────────────────
-def process_document(file_path, *, vision_consent=False):
+def process_document(file_path):
     """Inspect and extract a document, returning text plus decision metadata."""
     metadata = inspect_document(file_path)
     extension = metadata["extension"]
@@ -280,18 +287,10 @@ def process_document(file_path, *, vision_consent=False):
             }
 
         elif extension == ".pdf":
-            text, decision_metadata = _process_pdf(
-                file_path,
-                vision_consent=vision_consent,
-            )
+            text, decision_metadata = _process_pdf(file_path)
 
         elif extension == ".docx":
-            document = Document(file_path)
-            text = "\n".join(
-                paragraph.text
-                for paragraph in document.paragraphs
-                if paragraph.text.strip()
-            )
+            text = _extract_docx_text(file_path)
             decision_metadata = {
                 "extraction_method": "native_docx",
                 "used_vision": False,
@@ -299,10 +298,7 @@ def process_document(file_path, *, vision_consent=False):
             }
 
         elif extension in IMAGE_FILE_EXTENSIONS:
-            text = extract_image_with_vision(
-                file_path,
-                consent_granted=vision_consent,
-            )
+            text = extract_image_with_vision(file_path)
             decision_metadata = {
                 "extraction_method": "openai_vision",
                 "used_vision": True,
@@ -335,9 +331,6 @@ def process_document(file_path, *, vision_consent=False):
     return {"text": text, "metadata": metadata}
 
 
-def extract_text_from_file(file_path, *, vision_consent=False):
+def extract_text_from_file(file_path):
     """Compatibility wrapper that returns only extracted document text."""
-    return process_document(
-        file_path,
-        vision_consent=vision_consent,
-    )["text"]
+    return process_document(file_path)["text"]
