@@ -11,6 +11,7 @@ from agent_engine import (
     prepare_incident_case,
     run_document_agent,
 )
+from case_handoff import CaseHandoffError, send_case_to_make
 from incident_case import review_incident_case
 from rag_pipeline import (
     download_file_from_s3,
@@ -40,6 +41,7 @@ DOCUMENT_STATE_KEYS = [
     "vector_index",
     "chat_messages",
     "incident_case",
+    "case_handoff_receipt",
 ]
 
 
@@ -186,6 +188,40 @@ def render_incident_case_review(incident_case):
                 reviewer_note,
             )
             st.rerun()
+    elif status == "approved":
+        st.markdown("#### External workflow handoff")
+        handoff_receipt = st.session_state.get("case_handoff_receipt")
+        if (
+            handoff_receipt
+            and handoff_receipt.get("case_id") == incident_case.case_id
+        ):
+            st.success(
+                "Make accepted this approved case at "
+                f"{handoff_receipt['sent_at']}."
+            )
+            st.caption(
+                f"Event ID: `{handoff_receipt['event_id']}` · "
+                f"HTTP {handoff_receipt['http_status']}"
+            )
+        else:
+            st.caption(
+                "This explicitly sends the approved structured case to the "
+                "configured Make.com webhook. It does not approve the customer claim."
+            )
+            if st.button(
+                "Send Approved Case to Make",
+                key=f"handoff_{incident_case.case_id}",
+                type="primary",
+                use_container_width=True,
+            ):
+                with st.spinner("Sending the approved case to Make..."):
+                    try:
+                        st.session_state.case_handoff_receipt = send_case_to_make(
+                            incident_case
+                        )
+                        st.rerun()
+                    except CaseHandoffError as exc:
+                        st.error(f"The case was not handed off: {exc}")
 
     case_json = json.dumps(incident_case.to_dict(), indent=2)
     st.download_button(

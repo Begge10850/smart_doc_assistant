@@ -27,6 +27,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
 - 📋 **Structured Incident Cases** — Converts document facts into a validated case contract, applies deterministic policy checks, and requires human approval before later external handoff
+- 🔗 **Approved-Case Handoff** — Sends only human-approved, versioned case events to a Make.com webhook for controlled downstream automation
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
 ---
@@ -87,6 +88,9 @@ This assistant is ideal for:
 - OPENAI_API_KEY = "your_openai_api_key"
 - QA_MODEL = "gpt-5.6-sol" # optional override
 - VISION_MODEL = "gpt-5.6-sol" # optional override
+
+## [make]
+- WEBHOOK_URL = "https://hook.example.make.com/your_private_webhook" # keep private
 
 ## 🙌 Credits
 - Created by Treva Ogwang
