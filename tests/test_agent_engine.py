@@ -113,6 +113,45 @@ class ToolExecutionTests(unittest.TestCase):
 
 
 class AgentLoopTests(unittest.TestCase):
+    def test_structured_incident_facts_use_strict_json_schema(self):
+        facts = {
+            "incident_id": "INC-002",
+            "tracking_number": "NSP-FR-20260809-7821",
+            "carrier": "NorthStar Parcel",
+            "country": "France",
+            "incident_type": "parcel_damage",
+            "delivery_date": "2026-08-09",
+            "reported_date": "2026-08-14",
+            "declared_value": "EUR 89.90",
+            "evidence_supplied": ["Commercial invoice"],
+            "factual_summary": "Two glass jars were broken on arrival.",
+            "unresolved_fields": [],
+        }
+        captured_request = {}
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                captured_request.update(copy.deepcopy(kwargs))
+                return types.SimpleNamespace(output_text=json.dumps(facts))
+
+        fake_client = types.SimpleNamespace(responses=FakeResponses())
+        with patch.object(
+            agent_engine,
+            "_read_openai_settings",
+            return_value=("test-key", "test-model"),
+        ), patch.object(
+            agent_engine,
+            "OpenAI",
+            return_value=fake_client,
+        ):
+            result = agent_engine.extract_incident_facts("Incident report text")
+
+        self.assertEqual(result["incident_id"], "INC-002")
+        response_format = captured_request["text"]["format"]
+        self.assertEqual(response_format["type"], "json_schema")
+        self.assertTrue(response_format["strict"])
+        self.assertFalse(response_format["schema"]["additionalProperties"])
+
     def test_model_tool_call_is_executed_before_final_answer(self):
         tool_call = types.SimpleNamespace(
             type="function_call",

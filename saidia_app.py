@@ -1,11 +1,17 @@
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 
 import streamlit as st
 
-from agent_engine import DocumentAgentError, run_document_agent
+from agent_engine import (
+    DocumentAgentError,
+    prepare_incident_case,
+    run_document_agent,
+)
+from incident_case import review_incident_case
 from rag_pipeline import (
     download_file_from_s3,
     process_document,
@@ -33,6 +39,7 @@ DOCUMENT_STATE_KEYS = [
     "chunks",
     "vector_index",
     "chat_messages",
+    "incident_case",
 ]
 
 
@@ -52,6 +59,142 @@ def render_agent_trace(tool_trace):
             st.markdown(
                 f"**{step_number}. `{step['tool']}`** — {step['summary']}"
             )
+
+
+def render_incident_case_review(incident_case):
+    """Render a human-readable review of the structured incident payload."""
+    status = incident_case.approval_status
+    status_message = {
+        "draft": "Draft awaiting human review",
+        "approved": "Approved locally for a later handoff",
+        "rejected": "Rejected during human review",
+    }[status]
+    st.info(f"**Status:** {status_message}")
+
+    fact_rows = [
+        {"Field": "Case ID", "Value": incident_case.case_id},
+        {"Field": "Incident ID", "Value": incident_case.incident_id or "Unresolved"},
+        {
+            "Field": "Tracking number",
+            "Value": incident_case.tracking_number or "Unresolved",
+        },
+        {"Field": "Carrier", "Value": incident_case.carrier or "Unresolved"},
+        {"Field": "Country", "Value": incident_case.country or "Unresolved"},
+        {
+            "Field": "Incident type",
+            "Value": incident_case.incident_type or "Unresolved",
+        },
+        {
+            "Field": "Delivery date",
+            "Value": incident_case.delivery_date or "Unresolved",
+        },
+        {
+            "Field": "Reported date",
+            "Value": incident_case.reported_date or "Unresolved",
+        },
+        {
+            "Field": "Declared value",
+            "Value": incident_case.declared_value or "Unresolved",
+        },
+    ]
+    st.table(fact_rows)
+    st.markdown(f"**Factual summary:** {incident_case.factual_summary}")
+
+    if incident_case.policy_match_status == "matched":
+        st.markdown(
+            f"**Matched evaluation policy:** {incident_case.policy_title} "
+            f"(`{incident_case.policy_id}`)"
+        )
+        if incident_case.policy_is_fictional:
+            st.caption(
+                "This is a fictional project evaluation policy, not verified "
+                "real-world carrier terms."
+            )
+    else:
+        st.warning(
+            "No single matching evaluation policy was found. The case must not "
+            "be treated as policy-compliant."
+        )
+
+    timing_value = (
+        "Yes"
+        if incident_case.reported_on_time is True
+        else "No"
+        if incident_case.reported_on_time is False
+        else "Not determined"
+    )
+    st.markdown(
+        f"**Claim deadline:** {incident_case.claim_deadline or 'Not determined'}  \n"
+        f"**Reported on time:** {timing_value}"
+    )
+
+    st.markdown("**Evidence explicitly listed as supplied:**")
+    if incident_case.evidence_supplied:
+        for item in incident_case.evidence_supplied:
+            st.markdown(f"- {item}")
+    else:
+        st.markdown("- None identified")
+
+    st.markdown("**Missing required policy evidence:**")
+    if incident_case.missing_required_evidence:
+        for item in incident_case.missing_required_evidence:
+            st.markdown(f"- {item}")
+    else:
+        st.markdown("- None identified from the matched evaluation policy")
+
+    if incident_case.unresolved_fields:
+        st.markdown(
+            "**Unresolved document fields:** "
+            + ", ".join(incident_case.unresolved_fields)
+        )
+    st.markdown(
+        f"**Recommended next action:** {incident_case.recommended_next_action}"
+    )
+
+    reviewer_note = st.text_area(
+        "Reviewer note (optional)",
+        value=incident_case.reviewer_note,
+        key=f"reviewer_note_{incident_case.case_id}_{status}",
+        disabled=status != "draft",
+    )
+
+    if status == "draft":
+        st.caption(
+            "These buttons only record a decision in this browser session. "
+            "Nothing is sent to Jira, Make.com, Google Sheets, or another system."
+        )
+        approve_col, reject_col = st.columns(2)
+        if approve_col.button(
+            "✅ Approve Case Draft",
+            key=f"approve_{incident_case.case_id}",
+            use_container_width=True,
+        ):
+            st.session_state.incident_case = review_incident_case(
+                incident_case,
+                "approved",
+                reviewer_note,
+            )
+            st.rerun()
+        if reject_col.button(
+            "❌ Reject Case Draft",
+            key=f"reject_{incident_case.case_id}",
+            use_container_width=True,
+        ):
+            st.session_state.incident_case = review_incident_case(
+                incident_case,
+                "rejected",
+                reviewer_note,
+            )
+            st.rerun()
+
+    case_json = json.dumps(incident_case.to_dict(), indent=2)
+    st.download_button(
+        "Download structured case JSON",
+        data=case_json,
+        file_name=f"{incident_case.case_id}.json",
+        mime="application/json",
+        key=f"download_{incident_case.case_id}_{status}",
+    )
 
 
 st.set_page_config(page_title="Saidia Smart Document Assistant", layout="wide")
@@ -186,6 +329,27 @@ if st.session_state.get("processed_doc_hash"):
             disabled=True,
             key=f"preview_{st.session_state.processed_doc_hash}",
         )
+
+    st.subheader("📋 Incident case review")
+    st.caption(
+        "Prepare a consistent case record for human review before any later "
+        "handoff to Jira, Make.com, Google Sheets, or a database."
+    )
+    incident_case = st.session_state.get("incident_case")
+    if incident_case is None:
+        if st.button("Prepare Case for Review", key="prepare_case_btn"):
+            with st.spinner("Extracting and validating the incident case..."):
+                try:
+                    st.session_state.incident_case = prepare_incident_case(
+                        extracted_text,
+                        source_file=file_name,
+                        source_document_hash=st.session_state.processed_doc_hash,
+                    )
+                    st.rerun()
+                except DocumentAgentError as exc:
+                    st.error(f"The case draft could not be prepared: {exc}")
+    else:
+        render_incident_case_review(incident_case)
 
     st.subheader("💬 Chat with this document")
     if not chat_messages:

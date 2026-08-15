@@ -26,6 +26,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
+- 📋 **Structured Incident Cases** — Converts document facts into a validated case contract, applies deterministic policy checks, and requires human approval before later external handoff
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
 ---

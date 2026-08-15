@@ -2,12 +2,62 @@ import json
 
 from openai import OpenAI
 
+from incident_case import build_incident_case
 from policy_store import search_carrier_policies
 from qa_engine import _read_openai_settings, search_index
 
 
 MAX_TOOL_ROUNDS = 3
 MAX_SEARCH_RESULTS = 5
+
+
+INCIDENT_FACTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "incident_id": {"type": ["string", "null"]},
+        "tracking_number": {"type": ["string", "null"]},
+        "carrier": {"type": ["string", "null"]},
+        "country": {"type": ["string", "null"]},
+        "incident_type": {"type": ["string", "null"]},
+        "delivery_date": {"type": ["string", "null"]},
+        "reported_date": {"type": ["string", "null"]},
+        "declared_value": {"type": ["string", "null"]},
+        "evidence_supplied": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "factual_summary": {"type": "string"},
+        "unresolved_fields": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": [
+        "incident_id",
+        "tracking_number",
+        "carrier",
+        "country",
+        "incident_type",
+        "delivery_date",
+        "reported_date",
+        "declared_value",
+        "evidence_supplied",
+        "factual_summary",
+        "unresolved_fields",
+    ],
+    "additionalProperties": False,
+}
+
+
+INCIDENT_EXTRACTION_INSTRUCTIONS = (
+    "Extract logistics incident facts from the supplied document text. Use only "
+    "information explicitly supported by the document. Use null for a missing "
+    "single-value field and list its field name in unresolved_fields. Dates must "
+    "use YYYY-MM-DD when the document provides an unambiguous calendar date. "
+    "Normalize a clearly supported parcel-damage incident type to parcel_damage. "
+    "List only evidence that the document explicitly says was supplied. Do not "
+    "apply carrier policies, calculate deadlines, decide liability, or invent facts."
+)
 
 
 DOCUMENT_TOOLS = [
@@ -117,6 +167,79 @@ AGENT_INSTRUCTIONS = (
 
 class DocumentAgentError(RuntimeError):
     """A safe agent error that may be displayed in the Streamlit interface."""
+
+
+def extract_incident_facts(document_text):
+    """Convert unstructured incident text into schema-validated factual fields."""
+    text = str(document_text or "").strip()
+    if not text:
+        raise DocumentAgentError("The processed document contains no text to extract.")
+
+    api_key, model = _read_openai_settings()
+    client = OpenAI(api_key=api_key)
+    try:
+        response = client.responses.create(
+            model=model,
+            instructions=INCIDENT_EXTRACTION_INSTRUCTIONS,
+            input=[{"role": "user", "content": text}],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "incident_facts",
+                    "strict": True,
+                    "schema": INCIDENT_FACTS_SCHEMA,
+                },
+                "verbosity": "low",
+            },
+            reasoning={"effort": "medium"},
+            max_output_tokens=1000,
+        )
+        output_text = (response.output_text or "").strip()
+        if not output_text:
+            raise DocumentAgentError(
+                "The incident extractor returned an empty response."
+            )
+        facts = json.loads(output_text)
+        if not isinstance(facts, dict):
+            raise DocumentAgentError(
+                "The incident extractor returned an invalid case structure."
+            )
+        return facts
+    except DocumentAgentError:
+        raise
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise DocumentAgentError(
+            "The incident extractor returned invalid structured data."
+        ) from exc
+    except Exception as exc:
+        print("Incident extraction error:", type(exc).__name__)
+        raise DocumentAgentError(
+            "The incident case could not be prepared. Check the API model access, "
+            "usage limits, and application logs."
+        ) from exc
+
+
+def prepare_incident_case(
+    document_text,
+    *,
+    source_file,
+    source_document_hash,
+):
+    """Extract document facts and enrich them with deterministic policy logic."""
+    facts = extract_incident_facts(document_text)
+    carrier = facts.get("carrier") or ""
+    country = facts.get("country") or ""
+    incident_type = facts.get("incident_type") or ""
+    if carrier and country and incident_type:
+        policy_result = search_carrier_policies(carrier, country, incident_type)
+    else:
+        policy_result = {"match_count": 0, "policies": []}
+    return build_incident_case(
+        facts,
+        source_file=source_file,
+        source_document_hash=source_document_hash,
+        policy_result=policy_result,
+    )
 
 
 def _recent_conversation(chat_history):
