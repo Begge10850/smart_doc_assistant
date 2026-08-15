@@ -81,6 +81,36 @@ class ToolExecutionTests(unittest.TestCase):
         self.assertEqual(result["extraction_method"], "native_pdf")
         self.assertEqual(result["searchable_chunk_count"], 2)
 
+    def test_search_carrier_policy_returns_matching_policy(self):
+        policy_result = {
+            "match_count": 1,
+            "policies": [{"policy_id": "northstar-parcel-damage-eu-v1"}],
+        }
+        with patch.object(
+            agent_engine,
+            "search_carrier_policies",
+            return_value=policy_result,
+        ) as mocked_search:
+            result = agent_engine.execute_document_tool(
+                "search_carrier_policy",
+                {
+                    "carrier": "NorthStar Parcel",
+                    "country": "France",
+                    "incident_type": "parcel_damage",
+                },
+                file_name="INC-002.pdf",
+                document_metadata={},
+                vector_index="index-object",
+                chunks=["incident text"],
+            )
+
+        mocked_search.assert_called_once_with(
+            "NorthStar Parcel",
+            "France",
+            "parcel_damage",
+        )
+        self.assertEqual(result["match_count"], 1)
+
 
 class AgentLoopTests(unittest.TestCase):
     def test_model_tool_call_is_executed_before_final_answer(self):

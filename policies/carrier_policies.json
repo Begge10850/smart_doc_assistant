@@ -1,0 +1,25 @@
+[
+  {
+    "policy_id": "northstar-parcel-damage-eu-v1",
+    "title": "NorthStar Parcel EU Damage Claim Policy",
+    "carrier": "NorthStar Parcel",
+    "countries": ["France", "Germany"],
+    "incident_type": "parcel_damage",
+    "reporting_window_days": 7,
+    "deadline_basis": "calendar days after delivery",
+    "required_evidence": [
+      "tracking number",
+      "delivery date",
+      "damage report date",
+      "commercial invoice or other proof of value",
+      "photograph of the damaged item",
+      "photograph of the external packaging"
+    ],
+    "handling_guidance": [
+      "Request any missing required evidence before the claim is submitted.",
+      "Do not approve, deny, or assign carrier liability from the incident report alone.",
+      "Require human review before submitting a claim to an external system."
+    ],
+    "fictional_evaluation_policy": true
+  }
+]

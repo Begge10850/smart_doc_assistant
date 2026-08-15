@@ -21,10 +21,11 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🔒 **Secure Document Upload** — Files are stored in AWS S3 bucket
 - 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
 - 📄 **Supported File Types** — PDF, DOCX, TXT, JPG, JPEG, and PNG
-- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and consent-gated OpenAI vision for images and scanned PDFs
+- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and automatically selects OpenAI Vision for images and scanned PDFs
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
+- 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
 ---
@@ -48,7 +49,7 @@ This assistant is ideal for:
 | `pdfplumber`, `docx`, `PyMuPDF` | Text, annotation, image, and scanned-PDF preparation |
 | `sentence-transformers` | Text embeddings                   |
 | `faiss-cpu`           | Vector search                       |
-| `openai`              | Document Q&A and consent-gated vision transcription |
+| `openai`              | Document Q&A, agent tool selection, and automatic vision transcription |
 | `python-dotenv`       | Local environment setup (optional)  |
 
 ---
@@ -62,17 +63,18 @@ This assistant is ideal for:
 | vector_store.py       | Chunking + FAISS index               |
 | qa_engine.py          | GPT Q&A engine                       |
 | agent_engine.py       | Bounded read-only document agent and tool controller |
-| vision_engine.py      | Consent-gated OpenAI image transcription |
+| policy_store.py       | Read-only fictional carrier-policy lookup |
+| vision_engine.py      | Automatic OpenAI image transcription |
 | requirements.txt      | .streamlit/-secrets.toml-Private Keys|
 
 📌 Notes
 - For digital documents, only retrieved document chunks are sent to OpenAI when answering questions.
 
-- Images and rendered pages from scanned PDFs are sent to OpenAI vision only after explicit user consent.
+- Images and rendered pages from scanned PDFs are sent to OpenAI Vision automatically when usable native text is unavailable; the app displays this routing clearly.
 
 - Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
 
-- The agent can only inspect metadata and search already-processed content. Its tools cannot modify files, delete objects, send messages, or perform external actions.
+- The agent can inspect metadata, search already-processed content, and read fictional evaluation policies. Its tools cannot modify files, delete objects, send messages, or perform external actions.
 
 ## 🔑 API Access Keys Required for the application.
 

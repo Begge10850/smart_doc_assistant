@@ -2,6 +2,7 @@ import json
 
 from openai import OpenAI
 
+from policy_store import search_carrier_policies
 from qa_engine import _read_openai_settings, search_index
 
 
@@ -56,6 +57,39 @@ DOCUMENT_TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "type": "function",
+        "name": "search_carrier_policy",
+        "description": (
+            "Look up a fictional evaluation policy for a carrier, country, and "
+            "incident type. Use this after retrieving those facts from the document "
+            "when the user asks about deadlines, required evidence, compliance, or "
+            "recommended next steps. Never treat a missing policy as permission to "
+            "invent carrier requirements."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "carrier": {
+                    "type": "string",
+                    "description": "Carrier name exactly as supported by the document.",
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Incident country exactly as supported by the document.",
+                },
+                "incident_type": {
+                    "type": "string",
+                    "description": (
+                        "Normalized incident category, such as parcel_damage."
+                    ),
+                },
+            },
+            "required": ["carrier", "country", "incident_type"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -72,6 +106,12 @@ AGENT_INSTRUCTIONS = (
     "perform useful calculations and explain them in plain language. State necessary "
     "assumptions, especially table orientation. Do not give a generic description when "
     "specific findings are available, and never invent missing information."
+    " When asked about claim deadlines, required evidence, policy compliance, or "
+    "next actions, first retrieve the incident's carrier, country, type, dates, and "
+    "evidence from the document, then use search_carrier_policy. Clearly distinguish "
+    "document facts from fictional evaluation-policy requirements. If no matching "
+    "policy is returned, say that the policy question cannot be determined. Never "
+    "present an evaluation policy as verified real-world carrier terms."
 )
 
 
@@ -151,6 +191,18 @@ def execute_document_tool(
             ],
         }
 
+    if tool_name == "search_carrier_policy":
+        carrier = str(arguments.get("carrier", "")).strip()
+        country = str(arguments.get("country", "")).strip()
+        incident_type = str(arguments.get("incident_type", "")).strip()
+        if not all((carrier, country, incident_type)):
+            return {
+                "error": "Carrier, country, and incident type are required.",
+                "match_count": 0,
+                "policies": [],
+            }
+        return search_carrier_policies(carrier, country, incident_type)
+
     return {
         "error": f"Unknown or unavailable document tool: {tool_name}",
     }
@@ -174,6 +226,17 @@ def _tool_trace_entry(tool_name, arguments, result):
                 f"{result.get('result_count', 0)} relevant excerpt(s)."
             ),
         }
+
+    if tool_name == "search_carrier_policy":
+        if result.get("match_count"):
+            summary = (
+                f"Found {result['match_count']} fictional evaluation policy for "
+                f"{arguments.get('carrier', 'the carrier')} in "
+                f"{arguments.get('country', 'the specified country')}."
+            )
+        else:
+            summary = "No matching fictional carrier policy was found."
+        return {"tool": tool_name, "summary": summary}
 
     return {
         "tool": tool_name,
