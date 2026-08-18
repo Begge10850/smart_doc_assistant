@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+st.write("DATABASE_URL secret exists:", "DATABASE_URL" in st.secrets)
+
 import streamlit as st
 
 from agent_engine import (
