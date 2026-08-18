@@ -42,6 +42,7 @@ DOCUMENT_STATE_KEYS = [
     "chat_messages",
     "incident_case",
     "case_handoff_receipt",
+    "incident_workflow_error",
 ]
 
 
@@ -64,98 +65,14 @@ def render_agent_trace(tool_trace):
 
 
 def render_incident_case(incident_case):
-    """Render a processed incident case and its external workflow result."""
+    """Lead with the workflow result and keep detailed analysis available."""
 
-    fact_rows = [
-        {"Field": "Case ID", "Value": incident_case.case_id},
-        {"Field": "Incident ID", "Value": incident_case.incident_id or "Unresolved"},
-        {
-            "Field": "Tracking number",
-            "Value": incident_case.tracking_number or "Unresolved",
-        },
-        {"Field": "Carrier", "Value": incident_case.carrier or "Unresolved"},
-        {"Field": "Country", "Value": incident_case.country or "Unresolved"},
-        {
-            "Field": "Incident type",
-            "Value": incident_case.incident_type or "Unresolved",
-        },
-        {
-            "Field": "Delivery date",
-            "Value": incident_case.delivery_date or "Unresolved",
-        },
-        {
-            "Field": "Reported date",
-            "Value": incident_case.reported_date or "Unresolved",
-        },
-        {
-            "Field": "Declared value",
-            "Value": incident_case.declared_value or "Unresolved",
-        },
-    ]
-    st.table(fact_rows)
-    st.markdown(f"**Factual summary:** {incident_case.factual_summary}")
-
-    if incident_case.policy_match_status == "matched":
-        st.markdown(
-            f"**Matched evaluation policy:** {incident_case.policy_title} "
-            f"(`{incident_case.policy_id}`)"
-        )
-        if incident_case.policy_is_fictional:
-            st.caption(
-                "This is a fictional project evaluation policy, not verified "
-                "real-world carrier terms."
-            )
-    else:
-        st.warning(
-            "No single matching evaluation policy was found. The case must not "
-            "be treated as policy-compliant."
-        )
-
-    timing_value = (
-        "Yes"
-        if incident_case.reported_on_time is True
-        else "No"
-        if incident_case.reported_on_time is False
-        else "Not determined"
-    )
-    st.markdown(
-        f"**Claim deadline:** {incident_case.claim_deadline or 'Not determined'}  \n"
-        f"**Reported on time:** {timing_value}"
-    )
-
-    st.markdown("**Evidence explicitly listed as supplied:**")
-    if incident_case.evidence_supplied:
-        for item in incident_case.evidence_supplied:
-            st.markdown(f"- {item}")
-    else:
-        st.markdown("- None identified")
-
-    st.markdown("**Missing required policy evidence:**")
-    if incident_case.missing_required_evidence:
-        for item in incident_case.missing_required_evidence:
-            st.markdown(f"- {item}")
-    else:
-        st.markdown("- None identified from the matched evaluation policy")
-
-    if incident_case.unresolved_fields:
-        st.markdown(
-            "**Unresolved document fields:** "
-            + ", ".join(incident_case.unresolved_fields)
-        )
-    st.markdown(
-        f"**Recommended next action:** {incident_case.recommended_next_action}"
-    )
-
-    st.markdown("#### Operational workflow")
     handoff_receipt = st.session_state.get("case_handoff_receipt")
     if handoff_receipt and handoff_receipt.get("case_id") == incident_case.case_id:
-        st.success(
-            "Make accepted this processed case at "
-            f"{handoff_receipt['sent_at']}."
-        )
+        st.success("The incident was routed to the operational workflow.")
         jira_result = handoff_receipt.get("jira_result", {})
         if jira_result:
-            st.markdown("**Jira ticket result**")
+            st.markdown("**Jira ticket**")
             st.table([
                 {"Field": label, "Value": jira_result.get(field, "Not returned")}
                 for field, label in (
@@ -163,15 +80,21 @@ def render_incident_case(incident_case):
                     ("title", "Title"),
                     ("routing", "Routing"),
                     ("status", "Status"),
-                    ("recommended_action", "Recommended action"),
                 )
             ])
+            st.markdown(
+                "**Recommended action:** "
+                + jira_result.get(
+                    "recommended_action",
+                    incident_case.recommended_next_action,
+                )
+            )
             if jira_result.get("jira_url"):
                 st.link_button("Open Jira ticket", jira_result["jira_url"])
         else:
             st.info(
-                "The case was handed off successfully. Ticket details will appear "
-                "here after the Make scenario is updated to return them."
+                "The case was handed off successfully, but Make did not return "
+                "ticket details."
             )
         st.caption(
             f"Event ID: `{handoff_receipt['event_id']}` · "
@@ -179,9 +102,10 @@ def render_incident_case(incident_case):
         )
     else:
         st.warning(
-            "The structured case is ready, but its automatic Make handoff did not "
-            "complete. Check the webhook configuration and retry the handoff."
+            "The document was analyzed, but the Make handoff did not complete."
         )
+        if st.session_state.get("incident_workflow_error"):
+            st.caption(st.session_state.incident_workflow_error)
         if st.button(
             "Retry Make Handoff",
             key=f"retry_handoff_{incident_case.case_id}",
@@ -192,18 +116,85 @@ def render_incident_case(incident_case):
                     st.session_state.case_handoff_receipt = send_case_to_make(
                         incident_case
                     )
+                    st.session_state.incident_workflow_error = None
                     st.rerun()
                 except CaseHandoffError as exc:
+                    st.session_state.incident_workflow_error = str(exc)
                     st.error(f"The case was not handed off: {exc}")
 
-    case_json = json.dumps(incident_case.to_dict(), indent=2)
-    st.download_button(
-        "Download structured case JSON",
-        data=case_json,
-        file_name=f"{incident_case.case_id}.json",
-        mime="application/json",
-        key=f"download_{incident_case.case_id}",
-    )
+    with st.expander("View case analysis", expanded=False):
+        fact_rows = [
+            {"Field": "Case ID", "Value": incident_case.case_id},
+            {"Field": "Incident ID", "Value": incident_case.incident_id or "Unresolved"},
+            {"Field": "Tracking number", "Value": incident_case.tracking_number or "Unresolved"},
+            {"Field": "Carrier", "Value": incident_case.carrier or "Unresolved"},
+            {"Field": "Country", "Value": incident_case.country or "Unresolved"},
+            {"Field": "Incident type", "Value": incident_case.incident_type or "Unresolved"},
+            {"Field": "Delivery date", "Value": incident_case.delivery_date or "Unresolved"},
+            {"Field": "Reported date", "Value": incident_case.reported_date or "Unresolved"},
+            {"Field": "Declared value", "Value": incident_case.declared_value or "Unresolved"},
+        ]
+        st.table(fact_rows)
+        st.markdown(f"**Factual summary:** {incident_case.factual_summary}")
+
+        if incident_case.policy_match_status == "matched":
+            st.markdown(
+                f"**Matched evaluation policy:** {incident_case.policy_title} "
+                f"(`{incident_case.policy_id}`)"
+            )
+            if incident_case.policy_is_fictional:
+                st.caption(
+                    "This is a fictional project evaluation policy, not verified "
+                    "real-world carrier terms."
+                )
+        else:
+            st.warning(
+                "No single matching evaluation policy was found. The case must not "
+                "be treated as policy-compliant."
+            )
+
+        timing_value = (
+            "Yes"
+            if incident_case.reported_on_time is True
+            else "No"
+            if incident_case.reported_on_time is False
+            else "Not determined"
+        )
+        st.markdown(
+            f"**Claim deadline:** {incident_case.claim_deadline or 'Not determined'}  \n"
+            f"**Reported on time:** {timing_value}"
+        )
+
+        st.markdown("**Evidence explicitly listed as supplied:**")
+        if incident_case.evidence_supplied:
+            for item in incident_case.evidence_supplied:
+                st.markdown(f"- {item}")
+        else:
+            st.markdown("- None identified")
+
+        st.markdown("**Missing required policy evidence:**")
+        if incident_case.missing_required_evidence:
+            for item in incident_case.missing_required_evidence:
+                st.markdown(f"- {item}")
+        else:
+            st.markdown("- None identified from the matched evaluation policy")
+
+        if incident_case.unresolved_fields:
+            st.markdown(
+                "**Unresolved document fields:** "
+                + ", ".join(incident_case.unresolved_fields)
+            )
+        st.markdown(
+            f"**Recommended next action:** {incident_case.recommended_next_action}"
+        )
+        case_json = json.dumps(incident_case.to_dict(), indent=2)
+        st.download_button(
+            "Download structured case JSON",
+            data=case_json,
+            file_name=f"{incident_case.case_id}.json",
+            mime="application/json",
+            key=f"download_{incident_case.case_id}",
+        )
 
 
 st.set_page_config(page_title="Saidia Smart Document Assistant", layout="wide")
@@ -315,9 +306,26 @@ if st.session_state.get("processing_requested"):
             st.session_state.chunks = chunks
             st.session_state.vector_index = vector_index
             st.session_state.chat_messages = []
-            st.session_state.processing_requested = False
 
-            status.update(label="Document ready for conversation", state="complete")
+            status.write("Analyzing the incident and preparing its case record...")
+            try:
+                incident_case = prepare_incident_case(
+                    extracted_text,
+                    source_file=file_name,
+                    source_document_hash=document_hash,
+                )
+                st.session_state.incident_case = incident_case
+
+                status.write("Routing the processed case to Make...")
+                st.session_state.case_handoff_receipt = send_case_to_make(
+                    incident_case
+                )
+                st.session_state.incident_workflow_error = None
+            except (DocumentAgentError, CaseHandoffError) as exc:
+                st.session_state.incident_workflow_error = str(exc)
+
+            st.session_state.processing_requested = False
+            status.update(label="Document processing complete", state="complete")
 
         st.rerun()
     except S3UploadError as exc:
@@ -362,15 +370,20 @@ if st.session_state.get("processed_doc_hash"):
             key=f"preview_{st.session_state.processed_doc_hash}",
         )
 
-    st.subheader("📋 Processed incident case")
+    st.subheader("🎫 Incident workflow result")
     st.caption(
-        "Prepare a consistent case record and hand it to the operational workflow. "
-        "Any human action happens in Jira, not in this browser session."
+        "Saidia analyzes the processed document automatically and routes the "
+        "operational case to Jira through Make."
     )
     incident_case = st.session_state.get("incident_case")
     if incident_case is None:
-        if st.button("Process Incident Case", key="prepare_case_btn"):
-            with st.spinner("Extracting, validating, and handing off the case..."):
+        st.warning(
+            "Document extraction completed, but incident analysis did not finish."
+        )
+        if st.session_state.get("incident_workflow_error"):
+            st.caption(st.session_state.incident_workflow_error)
+        if st.button("Retry Incident Workflow", key="prepare_case_btn"):
+            with st.spinner("Retrying incident analysis and handoff..."):
                 try:
                     incident_case = prepare_incident_case(
                         extracted_text,
@@ -381,9 +394,11 @@ if st.session_state.get("processed_doc_hash"):
                     st.session_state.case_handoff_receipt = send_case_to_make(
                         incident_case
                     )
+                    st.session_state.incident_workflow_error = None
                     st.rerun()
                 except (DocumentAgentError, CaseHandoffError) as exc:
-                    st.error(f"The case could not be processed: {exc}")
+                    st.session_state.incident_workflow_error = str(exc)
+                    st.error(f"The incident workflow could not complete: {exc}")
     else:
         render_incident_case(incident_case)
 

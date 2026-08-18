@@ -27,7 +27,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
 - 📋 **Structured Incident Cases** — Converts document facts into a validated case contract and applies deterministic policy, evidence, and deadline checks
-- 🔗 **Automatic Case Handoff** — Sends validated, versioned processed-case events to Make.com; operational human handling belongs in Jira
+- 🔗 **One-Click Automatic Case Handoff** — Processing a document also analyzes its incident and sends the validated, versioned case to Make.com; operational human handling belongs in Jira
 - 🗄️ **PostgreSQL Persistence** — Persists real processed-document metadata in hosted Supabase PostgreSQL via `DATABASE_URL`
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
@@ -83,7 +83,7 @@ This assistant is ideal for:
 
 - The agent can inspect metadata, search already-processed content, and read fictional evaluation policies. Its tools cannot modify files, delete objects, send messages, or perform external actions.
 
-- Processed document metadata is persisted to the `documents` table in hosted PostgreSQL. Structured incident cases are handed to Make automatically after validation; Streamlit does not approve or reject cases locally.
+- Selecting **Process Document** performs extraction, PostgreSQL persistence, incident analysis, and Make handoff in one workflow. Streamlit leads with the Jira result, keeps detailed case analysis collapsed for inspection, and does not approve or reject cases locally.
 
 - Make may return a JSON `jira_result` containing `issue_key`, `title`, `routing`, `status`, `recommended_action`, and optional `jira_url`. Streamlit displays these recruiter-friendly fields without requiring Jira access. Until the external Make scenario returns that JSON, the app displays a successful handoff receipt only.
 
