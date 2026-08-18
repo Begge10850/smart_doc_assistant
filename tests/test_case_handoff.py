@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -9,10 +10,10 @@ from case_handoff import (
 from incident_case import IncidentCase
 
 
-def make_case(status="approved"):
+def make_case():
     return IncidentCase(
         case_id="case-f717c1c08bbc2d65",
-        schema_version="1.0",
+        schema_version="2.0",
         source_file="INC-002_incomplete_damage.pdf",
         source_document_hash="abc123",
         incident_id="INC-002",
@@ -35,31 +36,25 @@ def make_case(status="approved"):
         required_evidence=["photograph of the external packaging"],
         missing_required_evidence=["photograph of the external packaging"],
         recommended_next_action="Request the missing photograph.",
-        approval_status=status,
-        reviewer_note="Reviewed for internal handoff.",
     )
 
 
 class CaseHandoffTests(unittest.TestCase):
-    def test_draft_case_cannot_build_external_event(self):
-        with self.assertRaises(CaseHandoffError):
-            build_handoff_event(make_case("draft"))
-
-    def test_approved_event_contains_versioned_case_payload(self):
+    def test_processed_event_contains_versioned_case_payload(self):
         event = build_handoff_event(
             make_case(),
             sent_at="2026-08-15T12:00:00Z",
         )
 
-        self.assertEqual(event["event_type"], "saidia.case.approved")
-        self.assertEqual(event["event_version"], "1.0")
+        self.assertEqual(event["event_type"], "saidia.case.processed")
+        self.assertEqual(event["event_version"], "2.0")
         self.assertEqual(
             event["event_id"],
             "handoff-case-f717c1c08bbc2d65",
         )
-        self.assertEqual(event["case"]["approval_status"], "approved")
+        self.assertNotIn("approval_status", event["case"])
 
-    def test_approved_case_posts_json_and_returns_receipt(self):
+    def test_processed_case_posts_json_and_returns_receipt(self):
         captured_request = {}
 
         def fake_post(url, **kwargs):
@@ -84,6 +79,30 @@ class CaseHandoffTests(unittest.TestCase):
             "handoff-case-f717c1c08bbc2d65",
         )
         self.assertEqual(captured_request["timeout"], 15)
+
+    def test_json_response_returns_recruiter_safe_jira_result(self):
+        response = json.dumps({
+            "jira_result": {
+                "issue_key": "OPS-42",
+                "title": "Review damaged parcel INC-002",
+                "routing": "Claims Operations",
+                "status": "To Do",
+                "recommended_action": "Request packaging photograph",
+                "jira_url": "https://example.atlassian.net/browse/OPS-42",
+                "internal_only": "not exposed",
+            }
+        })
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_case_to_make(
+                make_case(),
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+
+        self.assertEqual(receipt["jira_result"]["issue_key"], "OPS-42")
+        self.assertNotIn("internal_only", receipt["jira_result"])
 
     def test_make_rejection_becomes_safe_handoff_error(self):
         with patch(

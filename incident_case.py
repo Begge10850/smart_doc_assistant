@@ -1,11 +1,10 @@
 import hashlib
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 
-CASE_SCHEMA_VERSION = "1.0"
-APPROVAL_STATUSES = {"draft", "approved", "rejected"}
+CASE_SCHEMA_VERSION = "2.0"
 POLICY_MATCH_STATUSES = {"matched", "not_found", "ambiguous"}
 
 
@@ -41,9 +40,6 @@ class IncidentCase:
     required_evidence: List[str]
     missing_required_evidence: List[str]
     recommended_next_action: str
-    approval_status: str = "draft"
-    reviewer_note: str = ""
-
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -281,21 +277,4 @@ def build_incident_case(
         factual_summary=cleaned_facts["factual_summary"],
         unresolved_fields=cleaned_facts["unresolved_fields"],
         **assessment,
-    )
-
-
-def review_incident_case(
-    incident_case: IncidentCase,
-    approval_status: str,
-    reviewer_note: str = "",
-) -> IncidentCase:
-    """Record a human review decision without changing the extracted facts."""
-    if approval_status not in APPROVAL_STATUSES:
-        raise IncidentCaseError(
-            "Approval status must be draft, approved, or rejected."
-        )
-    return replace(
-        incident_case,
-        approval_status=approval_status,
-        reviewer_note=str(reviewer_note or "").strip(),
     )

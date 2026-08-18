@@ -26,8 +26,9 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
-- 📋 **Structured Incident Cases** — Converts document facts into a validated case contract, applies deterministic policy checks, and requires human approval before later external handoff
-- 🔗 **Approved-Case Handoff** — Sends only human-approved, versioned case events to a Make.com webhook for controlled downstream automation
+- 📋 **Structured Incident Cases** — Converts document facts into a validated case contract and applies deterministic policy, evidence, and deadline checks
+- 🔗 **Automatic Case Handoff** — Sends validated, versioned processed-case events to Make.com; operational human handling belongs in Jira
+- 🗄️ **PostgreSQL Persistence** — Persists real processed-document metadata in hosted Supabase PostgreSQL via `DATABASE_URL`
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
 
 ---
@@ -52,6 +53,7 @@ This assistant is ideal for:
 | `sentence-transformers` | Text embeddings                   |
 | `faiss-cpu`           | Vector search                       |
 | `openai`              | Document Q&A, agent tool selection, and automatic vision transcription |
+| `psycopg`             | PostgreSQL document persistence        |
 | `python-dotenv`       | Local environment setup (optional)  |
 
 ---
@@ -67,6 +69,9 @@ This assistant is ideal for:
 | agent_engine.py       | Bounded read-only document agent and tool controller |
 | policy_store.py       | Read-only fictional carrier-policy lookup |
 | vision_engine.py      | Automatic OpenAI image transcription |
+| incident_case.py      | Structured case validation and deterministic policy analysis |
+| case_handoff.py       | Versioned processed-case handoff to Make |
+| database.py           | PostgreSQL document persistence       |
 | requirements.txt      | .streamlit/-secrets.toml-Private Keys|
 
 📌 Notes
@@ -77,6 +82,10 @@ This assistant is ideal for:
 - Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
 
 - The agent can inspect metadata, search already-processed content, and read fictional evaluation policies. Its tools cannot modify files, delete objects, send messages, or perform external actions.
+
+- Processed document metadata is persisted to the `documents` table in hosted PostgreSQL. Structured incident cases are handed to Make automatically after validation; Streamlit does not approve or reject cases locally.
+
+- Make may return a JSON `jira_result` containing `issue_key`, `title`, `routing`, `status`, `recommended_action`, and optional `jira_url`. Streamlit displays these recruiter-friendly fields without requiring Jira access. Until the external Make scenario returns that JSON, the app displays a successful handoff receipt only.
 
 ## 🔑 API Access Keys Required for the application.
 
@@ -91,6 +100,9 @@ This assistant is ideal for:
 
 ## [make]
 - WEBHOOK_URL = "https://hook.example.make.com/your_private_webhook" # keep private
+
+## Database
+- DATABASE_URL = "postgresql://..." # hosted PostgreSQL connection string; keep private
 
 ## 🙌 Credits
 - Created by Treva Ogwang

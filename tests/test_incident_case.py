@@ -1,11 +1,6 @@
 import unittest
 
-from incident_case import (
-    IncidentCaseError,
-    build_case_id,
-    build_incident_case,
-    review_incident_case,
-)
+from incident_case import build_case_id, build_incident_case
 
 
 FACTS = {
@@ -67,24 +62,8 @@ class IncidentCaseTests(unittest.TestCase):
             incident_case.missing_required_evidence,
             ["photograph of the external packaging"],
         )
-        self.assertEqual(incident_case.approval_status, "draft")
-
-    def test_human_review_changes_status_without_changing_facts(self):
-        incident_case = build_incident_case(
-            FACTS,
-            source_file="INC-002.pdf",
-            source_document_hash="abc123",
-            policy_result=POLICY_RESULT,
-        )
-        approved = review_incident_case(
-            incident_case,
-            "approved",
-            "Ready for handoff after the missing photo arrives.",
-        )
-
-        self.assertEqual(approved.approval_status, "approved")
-        self.assertEqual(approved.tracking_number, incident_case.tracking_number)
-        self.assertEqual(incident_case.approval_status, "draft")
+        self.assertEqual(incident_case.schema_version, "2.0")
+        self.assertNotIn("approval_status", incident_case.to_dict())
 
     def test_declared_value_alone_is_not_proof_of_value(self):
         facts_without_invoice = dict(FACTS)
@@ -102,17 +81,6 @@ class IncidentCaseTests(unittest.TestCase):
             "commercial invoice or other proof of value",
             incident_case.missing_required_evidence,
         )
-
-    def test_invalid_approval_status_is_rejected(self):
-        incident_case = build_incident_case(
-            FACTS,
-            source_file="INC-002.pdf",
-            source_document_hash="abc123",
-            policy_result=POLICY_RESULT,
-        )
-        with self.assertRaises(IncidentCaseError):
-            review_incident_case(incident_case, "sent")
-
 
 if __name__ == "__main__":
     unittest.main()

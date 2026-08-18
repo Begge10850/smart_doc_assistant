@@ -12,7 +12,6 @@ from agent_engine import (
     run_document_agent,
 )
 from case_handoff import CaseHandoffError, send_case_to_make
-from incident_case import review_incident_case
 from rag_pipeline import (
     download_file_from_s3,
     process_document,
@@ -64,15 +63,8 @@ def render_agent_trace(tool_trace):
             )
 
 
-def render_incident_case_review(incident_case):
-    """Render a human-readable review of the structured incident payload."""
-    status = incident_case.approval_status
-    status_message = {
-        "draft": "Draft awaiting human review",
-        "approved": "Approved locally for a later handoff",
-        "rejected": "Rejected during human review",
-    }[status]
-    st.info(f"**Status:** {status_message}")
+def render_incident_case(incident_case):
+    """Render a processed incident case and its external workflow result."""
 
     fact_rows = [
         {"Field": "Case ID", "Value": incident_case.case_id},
@@ -154,75 +146,55 @@ def render_incident_case_review(incident_case):
         f"**Recommended next action:** {incident_case.recommended_next_action}"
     )
 
-    reviewer_note = st.text_area(
-        "Reviewer note (optional)",
-        value=incident_case.reviewer_note,
-        key=f"reviewer_note_{incident_case.case_id}_{status}",
-        disabled=status != "draft",
-    )
-
-    if status == "draft":
-        st.caption(
-            "These buttons only record a decision in this browser session. "
-            "Nothing is sent to Jira, Make.com, Google Sheets, or another system."
+    st.markdown("#### Operational workflow")
+    handoff_receipt = st.session_state.get("case_handoff_receipt")
+    if handoff_receipt and handoff_receipt.get("case_id") == incident_case.case_id:
+        st.success(
+            "Make accepted this processed case at "
+            f"{handoff_receipt['sent_at']}."
         )
-        approve_col, reject_col = st.columns(2)
-        if approve_col.button(
-            "✅ Approve Case Draft",
-            key=f"approve_{incident_case.case_id}",
-            use_container_width=True,
-        ):
-            st.session_state.incident_case = review_incident_case(
-                incident_case,
-                "approved",
-                reviewer_note,
-            )
-            st.rerun()
-        if reject_col.button(
-            "❌ Reject Case Draft",
-            key=f"reject_{incident_case.case_id}",
-            use_container_width=True,
-        ):
-            st.session_state.incident_case = review_incident_case(
-                incident_case,
-                "rejected",
-                reviewer_note,
-            )
-            st.rerun()
-    elif status == "approved":
-        st.markdown("#### External workflow handoff")
-        handoff_receipt = st.session_state.get("case_handoff_receipt")
-        if (
-            handoff_receipt
-            and handoff_receipt.get("case_id") == incident_case.case_id
-        ):
-            st.success(
-                "Make accepted this approved case at "
-                f"{handoff_receipt['sent_at']}."
-            )
-            st.caption(
-                f"Event ID: `{handoff_receipt['event_id']}` · "
-                f"HTTP {handoff_receipt['http_status']}"
-            )
+        jira_result = handoff_receipt.get("jira_result", {})
+        if jira_result:
+            st.markdown("**Jira ticket result**")
+            st.table([
+                {"Field": label, "Value": jira_result.get(field, "Not returned")}
+                for field, label in (
+                    ("issue_key", "Issue key"),
+                    ("title", "Title"),
+                    ("routing", "Routing"),
+                    ("status", "Status"),
+                    ("recommended_action", "Recommended action"),
+                )
+            ])
+            if jira_result.get("jira_url"):
+                st.link_button("Open Jira ticket", jira_result["jira_url"])
         else:
-            st.caption(
-                "This explicitly sends the approved structured case to the "
-                "configured Make.com webhook. It does not approve the customer claim."
+            st.info(
+                "The case was handed off successfully. Ticket details will appear "
+                "here after the Make scenario is updated to return them."
             )
-            if st.button(
-                "Send Approved Case to Make",
-                key=f"handoff_{incident_case.case_id}",
-                type="primary",
-                use_container_width=True,
-            ):
-                with st.spinner("Sending the approved case to Make..."):
-                    try:
-                        st.session_state.case_handoff_receipt = send_case_to_make(
-                            incident_case
-                        )
-                        st.rerun()
-                    except CaseHandoffError as exc:
-                        st.error(f"The case was not handed off: {exc}")
+        st.caption(
+            f"Event ID: `{handoff_receipt['event_id']}` · "
+            f"HTTP {handoff_receipt['http_status']}"
+        )
+    else:
+        st.warning(
+            "The structured case is ready, but its automatic Make handoff did not "
+            "complete. Check the webhook configuration and retry the handoff."
+        )
+        if st.button(
+            "Retry Make Handoff",
+            key=f"retry_handoff_{incident_case.case_id}",
+            use_container_width=True,
+        ):
+            with st.spinner("Retrying the operational handoff..."):
+                try:
+                    st.session_state.case_handoff_receipt = send_case_to_make(
+                        incident_case
+                    )
+                    st.rerun()
+                except CaseHandoffError as exc:
+                    st.error(f"The case was not handed off: {exc}")
 
     case_json = json.dumps(incident_case.to_dict(), indent=2)
     st.download_button(
@@ -230,7 +202,7 @@ def render_incident_case_review(incident_case):
         data=case_json,
         file_name=f"{incident_case.case_id}.json",
         mime="application/json",
-        key=f"download_{incident_case.case_id}_{status}",
+        key=f"download_{incident_case.case_id}",
     )
 
 
@@ -390,26 +362,30 @@ if st.session_state.get("processed_doc_hash"):
             key=f"preview_{st.session_state.processed_doc_hash}",
         )
 
-    st.subheader("📋 Incident case review")
+    st.subheader("📋 Processed incident case")
     st.caption(
-        "Prepare a consistent case record for human review before any later "
-        "handoff to Jira, Make.com, Google Sheets, or a database."
+        "Prepare a consistent case record and hand it to the operational workflow. "
+        "Any human action happens in Jira, not in this browser session."
     )
     incident_case = st.session_state.get("incident_case")
     if incident_case is None:
-        if st.button("Prepare Case for Review", key="prepare_case_btn"):
-            with st.spinner("Extracting and validating the incident case..."):
+        if st.button("Process Incident Case", key="prepare_case_btn"):
+            with st.spinner("Extracting, validating, and handing off the case..."):
                 try:
-                    st.session_state.incident_case = prepare_incident_case(
+                    incident_case = prepare_incident_case(
                         extracted_text,
                         source_file=file_name,
                         source_document_hash=st.session_state.processed_doc_hash,
                     )
+                    st.session_state.incident_case = incident_case
+                    st.session_state.case_handoff_receipt = send_case_to_make(
+                        incident_case
+                    )
                     st.rerun()
-                except DocumentAgentError as exc:
-                    st.error(f"The case draft could not be prepared: {exc}")
+                except (DocumentAgentError, CaseHandoffError) as exc:
+                    st.error(f"The case could not be processed: {exc}")
     else:
-        render_incident_case_review(incident_case)
+        render_incident_case(incident_case)
 
     st.subheader("💬 Chat with this document")
     if not chat_messages:

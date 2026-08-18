@@ -10,8 +10,8 @@ from urllib.request import Request, urlopen
 from incident_case import IncidentCase
 
 
-HANDOFF_EVENT_TYPE = "saidia.case.approved"
-HANDOFF_EVENT_VERSION = "1.0"
+HANDOFF_EVENT_TYPE = "saidia.case.processed"
+HANDOFF_EVENT_VERSION = "2.0"
 HANDOFF_TIMEOUT_SECONDS = 15
 
 
@@ -29,7 +29,7 @@ def _post_json(url, *, event, headers, timeout):
     )
     with urlopen(request, timeout=timeout) as response:
         status_code = getattr(response, "status", response.getcode())
-        response_text = response.read(500).decode("utf-8", errors="replace")
+        response_text = response.read(4096).decode("utf-8", errors="replace")
     return status_code, response_text
 
 
@@ -64,11 +64,6 @@ def build_handoff_event(
     sent_at: str = None,
 ) -> Dict[str, Any]:
     """Build the versioned event envelope sent to workflow integrations."""
-    if incident_case.approval_status != "approved":
-        raise CaseHandoffError(
-            "Only a human-approved case can be sent to an external workflow."
-        )
-
     event_time = sent_at or datetime.now(timezone.utc).isoformat().replace(
         "+00:00",
         "Z",
@@ -87,7 +82,7 @@ def send_case_to_make(
     *,
     post_request=_post_json,
 ) -> Dict[str, Any]:
-    """Send one approved case event to Make and return a safe receipt."""
+    """Send one processed case event to Make and return a safe receipt."""
     event = build_handoff_event(incident_case)
     webhook_url = _read_make_webhook_url()
 
@@ -113,12 +108,12 @@ def send_case_to_make(
         ) from exc
     except URLError as exc:
         raise CaseHandoffError(
-            "The approved case could not be sent to Make. Check the webhook "
+            "The processed case could not be sent to Make. Check the webhook "
             "configuration and network connection."
         ) from exc
     except Exception as exc:
         raise CaseHandoffError(
-            "The approved case handoff failed unexpectedly. Check the application logs."
+            "The processed case handoff failed unexpectedly. Check the application logs."
         ) from exc
 
     if not 200 <= response_status < 300:
@@ -128,7 +123,8 @@ def send_case_to_make(
         )
 
     response_text = str(response_text or "").strip()
-    return {
+    jira_result = _parse_jira_result(response_text)
+    receipt = {
         "case_id": incident_case.case_id,
         "event_id": event["event_id"],
         "sent_at": event["sent_at"],
@@ -136,3 +132,36 @@ def send_case_to_make(
         "make_response": response_text[:500],
         "status": "accepted",
     }
+    if jira_result:
+        receipt["jira_result"] = jira_result
+    return receipt
+
+
+def _parse_jira_result(response_text: str) -> Dict[str, Any]:
+    """Normalize an optional recruiter-safe Jira result returned by Make."""
+    if not response_text:
+        return {}
+    try:
+        response_data = json.loads(response_text)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(response_data, dict):
+        return {}
+
+    source = response_data.get("jira_result", response_data)
+    if not isinstance(source, dict):
+        return {}
+
+    result = {}
+    for field in (
+        "issue_key",
+        "title",
+        "routing",
+        "status",
+        "recommended_action",
+        "jira_url",
+    ):
+        value = source.get(field)
+        if value is not None and str(value).strip():
+            result[field] = str(value).strip()
+    return result
