@@ -19,3 +19,5 @@ openai>=1.0.0
 
 # Optional local dev utilities
 python-dotenv  # optional: only used if st.secrets not available
+
+psycopg[binary]
