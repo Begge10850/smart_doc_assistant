@@ -19,6 +19,7 @@ from rag_pipeline import (
 )
 from s3_upload import S3UploadError, upload_to_s3
 from vector_store import build_faiss_index, chunk_text, embed_chunks
+from database import upsert_document
 
 
 # Fix asyncio initialization for environments that do not provide a loop.
@@ -300,6 +301,28 @@ if st.session_state.get("processing_requested"):
             processing_result = process_document(local_path)
             extracted_text = processing_result["text"]
             document_metadata = processing_result["metadata"]
+            status.write("Saving document metadata to PostgreSQL...")
+
+            document_id = upsert_document(
+                document_hash=document_hash,
+                original_file_name=file_name,
+                s3_object_key=s3_object_key,
+                content_type=getattr(
+                    st.session_state.get("uploaded_file"),
+                    "type",
+                    None,
+                ),
+                size_bytes=len(file_data),
+                document_kind=document_metadata.get("extension"),
+                extraction_method=document_metadata.get("extraction_method"),
+                used_vision=document_metadata.get("used_vision", False),
+                page_count=document_metadata.get("page_count"),
+                extracted_word_count=document_metadata.get("extracted_word_count"),
+                extracted_character_count=document_metadata.get(
+                    "extracted_character_count"
+                ),
+                processing_status="processed",
+            )
             if not extracted_text.strip():
                 raise RuntimeError("No text could be extracted from the document.")
 
@@ -314,6 +337,7 @@ if st.session_state.get("processing_requested"):
             st.session_state.processed_doc_hash = document_hash
             st.session_state.processed_file_name = file_name
             st.session_state.s3_object_key = s3_object_key
+            st.session_state.document_id = document_id
             st.session_state.extracted_text = extracted_text
             st.session_state.document_metadata = document_metadata
             st.session_state.chunks = chunks
