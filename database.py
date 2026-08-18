@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+import streamlit as st
 from dotenv import load_dotenv
 
 
@@ -9,7 +10,16 @@ load_dotenv()
 
 def get_database_url():
     """Return the configured PostgreSQL connection URL."""
+
     database_url = os.getenv("DATABASE_URL")
+
+    if database_url:
+        return database_url
+
+    try:
+        database_url = st.secrets["DATABASE_URL"]
+    except (KeyError, FileNotFoundError):
+        database_url = None
 
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured.")
