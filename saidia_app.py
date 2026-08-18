@@ -1,8 +1,10 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
-import os
 from pathlib import Path
+import tempfile
+import time
 
 import streamlit as st
 
@@ -12,10 +14,7 @@ from agent_engine import (
     run_document_agent,
 )
 from case_handoff import CaseHandoffError, send_case_to_make
-from rag_pipeline import (
-    download_file_from_s3,
-    process_document,
-)
+from rag_pipeline import process_document
 from s3_upload import S3UploadError, upload_to_s3
 from vector_store import build_faiss_index, chunk_text, embed_chunks
 from database import upsert_document
@@ -43,6 +42,7 @@ DOCUMENT_STATE_KEYS = [
     "incident_case",
     "case_handoff_receipt",
     "incident_workflow_error",
+    "processing_timings",
 ]
 
 
@@ -62,6 +62,21 @@ def render_agent_trace(tool_trace):
             st.markdown(
                 f"**{step_number}. `{step['tool']}`** — {step['summary']}"
             )
+
+
+def process_uploaded_bytes(file_data, file_name):
+    """Process the original upload bytes without downloading the S3 copy."""
+    with tempfile.TemporaryDirectory(prefix="saidia-processing-") as temp_dir:
+        local_path = Path(temp_dir) / Path(file_name).name
+        local_path.write_bytes(file_data)
+        return process_document(str(local_path))
+
+
+def timed_call(function, *args):
+    """Return a function result together with its elapsed wall-clock seconds."""
+    started_at = time.perf_counter()
+    result = function(*args)
+    return result, time.perf_counter() - started_at
 
 
 def render_incident_case(incident_case):
@@ -222,7 +237,6 @@ with st.sidebar:
 
         if (
             document_hash == st.session_state.get("processed_doc_hash")
-            and st.session_state.get("vector_index") is not None
         ):
             st.info("This document is already processed for the current session.")
         else:
@@ -247,25 +261,37 @@ if st.session_state.get("processing_requested"):
     document_hash = hashlib.sha256(file_data).hexdigest()
 
     st.info(f"📁 Processing `{file_name}` for the first time in this session.")
+    processing_started_at = time.perf_counter()
+    processing_timings = {}
 
     try:
         with st.status("Preparing document...", expanded=True) as status:
-            status.write("Uploading the original document to S3...")
-            s3_object_key = upload_to_s3(file_data, file_name)
+            status.write(
+                "Uploading to S3 while extracting from the original file..."
+            )
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                upload_future = executor.submit(
+                    timed_call,
+                    upload_to_s3,
+                    file_data,
+                    file_name,
+                )
+                extraction_future = executor.submit(
+                    timed_call,
+                    process_uploaded_bytes,
+                    file_data,
+                    file_name,
+                )
+                processing_result, extraction_seconds = extraction_future.result()
+                s3_object_key, upload_seconds = upload_future.result()
 
-            local_path = os.path.join("temp", s3_object_key)
-            os.makedirs("temp", exist_ok=True)
-
-            status.write("Downloading the stored document for processing...")
-            if not download_file_from_s3(s3_object_key, local_path):
-                raise RuntimeError("The document could not be downloaded from S3.")
-
-            status.write("Inspecting the file and selecting an extraction method...")
-            processing_result = process_document(local_path)
+            processing_timings["Text extraction"] = extraction_seconds
+            processing_timings["S3 upload"] = upload_seconds
             extracted_text = processing_result["text"]
             document_metadata = processing_result["metadata"]
             status.write("Saving document metadata to PostgreSQL...")
 
+            database_started_at = time.perf_counter()
             document_id = upsert_document(
                 document_hash=document_hash,
                 original_file_name=file_name,
@@ -286,16 +312,20 @@ if st.session_state.get("processing_requested"):
                 ),
                 processing_status="processed",
             )
+            processing_timings["PostgreSQL persistence"] = (
+                time.perf_counter() - database_started_at
+            )
             if not extracted_text.strip():
                 raise RuntimeError("No text could be extracted from the document.")
 
-            status.write("Creating document chunks and embeddings...")
+            status.write("Preparing searchable document chunks...")
+            chunking_started_at = time.perf_counter()
             chunks = chunk_text(extracted_text)
             if not chunks:
                 raise RuntimeError("The extracted document produced no text chunks.")
-
-            embeddings = embed_chunks(chunks)
-            vector_index = build_faiss_index(embeddings)
+            processing_timings["Text chunking"] = (
+                time.perf_counter() - chunking_started_at
+            )
 
             st.session_state.processed_doc_hash = document_hash
             st.session_state.processed_file_name = file_name
@@ -304,10 +334,13 @@ if st.session_state.get("processing_requested"):
             st.session_state.extracted_text = extracted_text
             st.session_state.document_metadata = document_metadata
             st.session_state.chunks = chunks
-            st.session_state.vector_index = vector_index
+            # Build embeddings lazily on the first chat question so the Jira
+            # result is not delayed by semantic-search preparation.
+            st.session_state.vector_index = None
             st.session_state.chat_messages = []
 
             status.write("Analyzing the incident and preparing its case record...")
+            analysis_started_at = time.perf_counter()
             try:
                 incident_case = prepare_incident_case(
                     extracted_text,
@@ -315,15 +348,26 @@ if st.session_state.get("processing_requested"):
                     source_document_hash=document_hash,
                 )
                 st.session_state.incident_case = incident_case
+                processing_timings["Incident analysis"] = (
+                    time.perf_counter() - analysis_started_at
+                )
 
                 status.write("Routing the processed case to Make...")
+                handoff_started_at = time.perf_counter()
                 st.session_state.case_handoff_receipt = send_case_to_make(
                     incident_case
+                )
+                processing_timings["Make/Jira handoff"] = (
+                    time.perf_counter() - handoff_started_at
                 )
                 st.session_state.incident_workflow_error = None
             except (DocumentAgentError, CaseHandoffError) as exc:
                 st.session_state.incident_workflow_error = str(exc)
 
+            processing_timings["Total"] = (
+                time.perf_counter() - processing_started_at
+            )
+            st.session_state.processing_timings = processing_timings
             st.session_state.processing_requested = False
             status.update(label="Document processing complete", state="complete")
 
@@ -360,6 +404,14 @@ if st.session_state.get("processed_doc_hash"):
             "OpenAI Vision was selected automatically because this document "
             "did not contain enough usable native text."
         )
+
+    processing_timings = st.session_state.get("processing_timings", {})
+    if processing_timings:
+        with st.expander("⏱️ Processing performance", expanded=False):
+            st.table([
+                {"Stage": stage, "Seconds": f"{seconds:.2f}"}
+                for stage, seconds in processing_timings.items()
+            ])
 
     with st.expander("🧠 Preview extracted text", expanded=False):
         st.text_area(
@@ -424,6 +476,14 @@ if st.session_state.get("processed_doc_hash"):
         with st.chat_message("assistant"):
             with st.spinner("The document agent is deciding what to inspect..."):
                 try:
+                    if vector_index is None:
+                        index_started_at = time.perf_counter()
+                        embeddings = embed_chunks(chunks)
+                        vector_index = build_faiss_index(embeddings)
+                        st.session_state.vector_index = vector_index
+                        st.session_state.setdefault("processing_timings", {})[
+                            "Semantic index (first chat)"
+                        ] = time.perf_counter() - index_started_at
                     agent_result = run_document_agent(
                         question,
                         file_name=file_name,
@@ -436,6 +496,12 @@ if st.session_state.get("processed_doc_hash"):
                     tool_trace = agent_result["tool_trace"]
                 except DocumentAgentError as exc:
                     answer = f"I could not answer that question: {exc}"
+                    tool_trace = []
+                except Exception:
+                    answer = (
+                        "I could not prepare semantic search for this document. "
+                        "Please try the question again."
+                    )
                     tool_trace = []
 
             st.markdown(answer)

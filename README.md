@@ -22,6 +22,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
 - 📄 **Supported File Types** — PDF, DOCX, TXT, JPG, JPEG, and PNG
 - 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and automatically selects OpenAI Vision for images and scanned PDFs
+- ⚡ **Concurrent First-Pass Processing** — Extracts directly from the original upload while S3 storage runs in parallel, avoiding an immediate S3 re-download
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
@@ -83,7 +84,7 @@ This assistant is ideal for:
 
 - The agent can inspect metadata, search already-processed content, and read fictional evaluation policies. Its tools cannot modify files, delete objects, send messages, or perform external actions.
 
-- Selecting **Process Document** performs extraction, PostgreSQL persistence, incident analysis, and Make handoff in one workflow. Streamlit leads with the Jira result, keeps detailed case analysis collapsed for inspection, and does not approve or reject cases locally.
+- Selecting **Process Document** performs extraction, PostgreSQL persistence, incident analysis, and Make handoff in one workflow. Extraction uses the original uploaded bytes while S3 upload runs concurrently; semantic embeddings are deferred until the first chat question so they do not delay the Jira result. Streamlit leads with the Jira result, keeps detailed case analysis collapsed for inspection, and does not approve or reject cases locally.
 
 - Make may return a JSON `jira_result` containing `issue_key`, `title`, `routing`, `status`, `recommended_action`, and optional `jira_url`. Streamlit displays these recruiter-friendly fields without requiring Jira access. Until the external Make scenario returns that JSON, the app displays a successful handoff receipt only.
 
