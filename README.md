@@ -28,6 +28,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
 - 📋 **Structured Incident Cases** — Converts document facts into a validated case contract and applies deterministic policy, evidence, and deadline checks
+- 🛡️ **Incident Relevance Gate** — Keeps unrelated documents available for preview and chat without creating Make, Sheets, or Jira records
 - 🔗 **One-Click Automatic Case Handoff** — Processing a document also analyzes its incident and sends the validated, versioned case to Make.com; operational human handling belongs in Jira
 - 🗄️ **PostgreSQL Persistence** — Persists real processed-document metadata in hosted Supabase PostgreSQL via `DATABASE_URL`
 - ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit

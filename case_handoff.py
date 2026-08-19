@@ -4,7 +4,7 @@ import socket
 from datetime import datetime, timezone
 from typing import Any, Dict
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from incident_case import IncidentCase
@@ -164,4 +164,19 @@ def _parse_jira_result(response_text: str) -> Dict[str, Any]:
         value = source.get(field)
         if value is not None and str(value).strip():
             result[field] = str(value).strip()
+
+    issue_key = result.get("issue_key")
+    jira_url = result.get("jira_url")
+    if not issue_key:
+        result.pop("jira_url", None)
+    elif jira_url:
+        parsed_url = urlparse(jira_url)
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            result.pop("jira_url", None)
+        elif parsed_url.path.rstrip("/").endswith("/browse"):
+            result["jira_url"] = urlunparse(
+                parsed_url._replace(
+                    path=f"{parsed_url.path.rstrip('/')}/{quote(issue_key)}"
+                )
+            )
     return result

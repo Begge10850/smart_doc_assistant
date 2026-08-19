@@ -104,6 +104,44 @@ class CaseHandoffTests(unittest.TestCase):
         self.assertEqual(receipt["jira_result"]["issue_key"], "OPS-42")
         self.assertNotIn("internal_only", receipt["jira_result"])
 
+    def test_incomplete_jira_browse_url_is_completed_with_issue_key(self):
+        response = json.dumps({
+            "jira_result": {
+                "issue_key": "KAN-15",
+                "jira_url": "https://saidia-logistics.atlassian.net/browse/",
+            }
+        })
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_case_to_make(
+                make_case(),
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+
+        self.assertEqual(
+            receipt["jira_result"]["jira_url"],
+            "https://saidia-logistics.atlassian.net/browse/KAN-15",
+        )
+
+    def test_jira_url_is_hidden_without_issue_key(self):
+        response = json.dumps({
+            "jira_result": {
+                "jira_url": "https://saidia-logistics.atlassian.net/browse/",
+            }
+        })
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_case_to_make(
+                make_case(),
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+
+        self.assertNotIn("jira_result", receipt)
+
     def test_make_rejection_becomes_safe_handoff_error(self):
         with patch(
             "case_handoff._read_make_webhook_url",

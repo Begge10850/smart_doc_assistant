@@ -115,6 +115,8 @@ class ToolExecutionTests(unittest.TestCase):
 class AgentLoopTests(unittest.TestCase):
     def test_structured_incident_facts_use_strict_json_schema(self):
         facts = {
+            "is_logistics_incident": True,
+            "relevance_reason": "A concrete damaged-parcel incident is described.",
             "incident_id": "INC-002",
             "tracking_number": "NSP-FR-20260809-7821",
             "carrier": "NorthStar Parcel",
@@ -151,6 +153,64 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(response_format["type"], "json_schema")
         self.assertTrue(response_format["strict"])
         self.assertFalse(response_format["schema"]["additionalProperties"])
+
+    def test_non_incident_document_is_rejected_before_policy_lookup(self):
+        facts = {
+            "is_logistics_incident": False,
+            "relevance_reason": "This is a lunch menu, not an incident report.",
+            "incident_id": None,
+            "tracking_number": None,
+            "carrier": None,
+            "country": None,
+            "incident_type": None,
+            "delivery_date": None,
+            "reported_date": None,
+            "declared_value": None,
+            "evidence_supplied": [],
+            "factual_summary": "A lunch menu.",
+            "unresolved_fields": [],
+        }
+        with patch.object(
+            agent_engine,
+            "extract_incident_facts",
+            return_value=facts,
+        ), patch.object(agent_engine, "search_carrier_policies") as policy_search:
+            with self.assertRaises(agent_engine.NonIncidentDocumentError):
+                agent_engine.prepare_incident_case(
+                    "Vegetarian options available.",
+                    source_file="menu.pdf",
+                    source_document_hash="menu-hash",
+                )
+
+        policy_search.assert_not_called()
+
+    def test_incident_label_without_core_logistics_facts_is_rejected(self):
+        facts = {
+            "is_logistics_incident": True,
+            "relevance_reason": "The text vaguely mentions an incident.",
+            "incident_id": None,
+            "tracking_number": None,
+            "carrier": None,
+            "country": None,
+            "incident_type": None,
+            "delivery_date": None,
+            "reported_date": None,
+            "declared_value": None,
+            "evidence_supplied": [],
+            "factual_summary": "No concrete logistics facts are present.",
+            "unresolved_fields": [],
+        }
+        with patch.object(
+            agent_engine,
+            "extract_incident_facts",
+            return_value=facts,
+        ):
+            with self.assertRaises(agent_engine.NonIncidentDocumentError):
+                agent_engine.prepare_incident_case(
+                    "A vague incident reference.",
+                    source_file="generic.pdf",
+                    source_document_hash="generic-hash",
+                )
 
     def test_model_tool_call_is_executed_before_final_answer(self):
         tool_call = types.SimpleNamespace(

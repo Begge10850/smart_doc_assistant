@@ -10,6 +10,7 @@ import streamlit as st
 
 from agent_engine import (
     DocumentAgentError,
+    NonIncidentDocumentError,
     prepare_incident_case,
     run_document_agent,
 )
@@ -42,6 +43,7 @@ DOCUMENT_STATE_KEYS = [
     "incident_case",
     "case_handoff_receipt",
     "incident_workflow_error",
+    "non_incident_message",
     "processing_timings",
 ]
 
@@ -361,6 +363,10 @@ if st.session_state.get("processing_requested"):
                     time.perf_counter() - handoff_started_at
                 )
                 st.session_state.incident_workflow_error = None
+                st.session_state.non_incident_message = None
+            except NonIncidentDocumentError as exc:
+                st.session_state.non_incident_message = str(exc)
+                st.session_state.incident_workflow_error = None
             except (DocumentAgentError, CaseHandoffError) as exc:
                 st.session_state.incident_workflow_error = str(exc)
 
@@ -429,12 +435,24 @@ if st.session_state.get("processed_doc_hash"):
     )
     incident_case = st.session_state.get("incident_case")
     if incident_case is None:
-        st.warning(
-            "Document extraction completed, but incident analysis did not finish."
-        )
-        if st.session_state.get("incident_workflow_error"):
-            st.caption(st.session_state.incident_workflow_error)
-        if st.button("Retry Incident Workflow", key="prepare_case_btn"):
+        non_incident_message = st.session_state.get("non_incident_message")
+        if non_incident_message:
+            st.info("No supported logistics incident was detected.")
+            st.caption(non_incident_message)
+            st.caption(
+                "The document is still available for preview and chat. No case "
+                "was sent to Make, Google Sheets, or Jira."
+            )
+        else:
+            st.warning(
+                "Document extraction completed, but incident analysis did not finish."
+            )
+            if st.session_state.get("incident_workflow_error"):
+                st.caption(st.session_state.incident_workflow_error)
+        if not non_incident_message and st.button(
+            "Retry Incident Workflow",
+            key="prepare_case_btn",
+        ):
             with st.spinner("Retrying incident analysis and handoff..."):
                 try:
                     incident_case = prepare_incident_case(
@@ -446,6 +464,11 @@ if st.session_state.get("processed_doc_hash"):
                     st.session_state.case_handoff_receipt = send_case_to_make(
                         incident_case
                     )
+                    st.session_state.incident_workflow_error = None
+                    st.session_state.non_incident_message = None
+                    st.rerun()
+                except NonIncidentDocumentError as exc:
+                    st.session_state.non_incident_message = str(exc)
                     st.session_state.incident_workflow_error = None
                     st.rerun()
                 except (DocumentAgentError, CaseHandoffError) as exc:

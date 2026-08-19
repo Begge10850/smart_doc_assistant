@@ -14,6 +14,8 @@ MAX_SEARCH_RESULTS = 5
 INCIDENT_FACTS_SCHEMA = {
     "type": "object",
     "properties": {
+        "is_logistics_incident": {"type": "boolean"},
+        "relevance_reason": {"type": "string"},
         "incident_id": {"type": ["string", "null"]},
         "tracking_number": {"type": ["string", "null"]},
         "carrier": {"type": ["string", "null"]},
@@ -33,6 +35,8 @@ INCIDENT_FACTS_SCHEMA = {
         },
     },
     "required": [
+        "is_logistics_incident",
+        "relevance_reason",
         "incident_id",
         "tracking_number",
         "carrier",
@@ -50,7 +54,14 @@ INCIDENT_FACTS_SCHEMA = {
 
 
 INCIDENT_EXTRACTION_INSTRUCTIONS = (
-    "Extract logistics incident facts from the supplied document text. Use only "
+    "First decide whether the supplied text is a logistics incident report or "
+    "contains a concrete shipment, delivery, loss, damage, or carrier incident. "
+    "Set is_logistics_incident to false for menus, general policies, unrelated "
+    "business documents, and other texts without a concrete logistics incident. "
+    "When false, explain why in relevance_reason, use null for every single-value "
+    "incident field, and return an empty evidence_supplied list. Do not reinterpret "
+    "generic document statements as logistics evidence. When true, extract logistics "
+    "incident facts from the supplied document text. Use only "
     "information explicitly supported by the document. Use null for a missing "
     "single-value field and list its field name in unresolved_fields. Dates must "
     "use YYYY-MM-DD when the document provides an unambiguous calendar date. "
@@ -169,6 +180,10 @@ class DocumentAgentError(RuntimeError):
     """A safe agent error that may be displayed in the Streamlit interface."""
 
 
+class NonIncidentDocumentError(DocumentAgentError):
+    """Raised when a document is not a supported logistics incident report."""
+
+
 def extract_incident_facts(document_text):
     """Convert unstructured incident text into schema-validated factual fields."""
     text = str(document_text or "").strip()
@@ -227,6 +242,18 @@ def prepare_incident_case(
 ):
     """Extract document facts and enrich them with deterministic policy logic."""
     facts = extract_incident_facts(document_text)
+    core_incident_facts = (
+        facts.get("incident_id"),
+        facts.get("tracking_number"),
+        facts.get("carrier"),
+        facts.get("incident_type"),
+    )
+    if not facts.get("is_logistics_incident") or not any(core_incident_facts):
+        reason = str(facts.get("relevance_reason") or "").strip()
+        raise NonIncidentDocumentError(
+            reason
+            or "The document does not contain a supported logistics incident."
+        )
     carrier = facts.get("carrier") or ""
     country = facts.get("country") or ""
     incident_type = facts.get("incident_type") or ""
