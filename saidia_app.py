@@ -17,8 +17,12 @@ from agent_engine import (
 from case_handoff import CaseHandoffError, send_case_to_make
 from rag_pipeline import process_document
 from s3_upload import S3UploadError, upload_to_s3
-from vector_store import build_faiss_index, chunk_text, embed_chunks
-from database import save_document_chunks, upsert_document
+from vector_store import chunk_text, embed_chunks
+from database import (
+    document_has_embeddings,
+    save_document_chunks,
+    upsert_document,
+)
 
 
 # Fix asyncio initialization for environments that do not provide a loop.
@@ -39,7 +43,6 @@ DOCUMENT_STATE_KEYS = [
     "extracted_text",
     "document_metadata",
     "chunks",
-    "vector_index",
     "chat_messages",
     "incident_case",
     "case_handoff_receipt",
@@ -50,7 +53,7 @@ DOCUMENT_STATE_KEYS = [
 
 
 def clear_document_session():
-    """Forget the processed document, vector index, and its conversation."""
+    """Forget the processed document and its conversation."""
     for key in DOCUMENT_STATE_KEYS:
         st.session_state.pop(key, None)
 
@@ -340,7 +343,6 @@ if st.session_state.get("processing_requested"):
             st.session_state.chunks = chunks
             # Build embeddings lazily on the first chat question so the Jira
             # result is not delayed by semantic-search preparation.
-            st.session_state.vector_index = None
             st.session_state.chat_messages = []
 
             status.write("Analyzing the incident and preparing its case record...")
@@ -395,7 +397,6 @@ if st.session_state.get("processed_doc_hash"):
     extracted_text = st.session_state.extracted_text
     document_metadata = st.session_state.document_metadata
     chunks = st.session_state.chunks
-    vector_index = st.session_state.vector_index
     chat_messages = st.session_state.setdefault("chat_messages", [])
 
     st.success(f"✅ `{file_name}` is processed and cached for this session.")
@@ -501,7 +502,7 @@ if st.session_state.get("processed_doc_hash"):
         with st.chat_message("assistant"):
             with st.spinner("The document agent is deciding what to inspect..."):
                 try:
-                    if vector_index is None:
+                    if not document_has_embeddings(st.session_state.document_id):
                         index_started_at = time.perf_counter()
 
                         embeddings = embed_chunks(chunks)
@@ -513,12 +514,6 @@ if st.session_state.get("processed_doc_hash"):
                             embedding_model="sentence-transformers/all-mpnet-base-v2",
                         )
 
-                        vector_index = build_faiss_index(embeddings)
-                        st.session_state.vector_index = vector_index
-
-                        st.session_state.setdefault("processing_timings", {})[
-                            "Semantic index (first chat)"
-                        ] = time.perf_counter() - index_started_at
                         st.session_state.setdefault("processing_timings", {})[
                             "Semantic index (first chat)"
                         ] = time.perf_counter() - index_started_at
@@ -526,7 +521,7 @@ if st.session_state.get("processed_doc_hash"):
                         question,
                         file_name=file_name,
                         document_metadata=document_metadata,
-                        vector_index=vector_index,
+                        document_id=st.session_state.document_id,
                         chunks=chunks,
                         chat_history=prior_history,
                     )

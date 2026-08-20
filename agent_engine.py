@@ -5,7 +5,8 @@ from openai import OpenAI
 
 from incident_case import build_incident_case
 from policy_store import search_carrier_policies
-from qa_engine import _read_openai_settings, search_index
+from qa_engine import _read_openai_settings, get_embedding_model
+from database import search_document_chunks
 
 
 MAX_TOOL_ROUNDS = 3
@@ -346,7 +347,7 @@ def execute_document_tool(
     *,
     file_name,
     document_metadata,
-    vector_index,
+    document_id,
     chunks,
 ):
     """Execute one approved read-only document tool and return a JSON-safe result."""
@@ -366,18 +367,30 @@ def execute_document_tool(
         except (TypeError, ValueError):
             requested_results = 3
         result_count = max(1, min(requested_results, MAX_SEARCH_RESULTS))
-        excerpts = search_index(
-            query,
-            vector_index,
-            chunks,
-            top_k=result_count,
+
+        embedding_model = get_embedding_model()
+        query_embedding = embedding_model.encode(query)
+
+        rows = search_document_chunks(
+            document_id=document_id,
+            query_embedding=query_embedding,
+            limit=result_count,
         )
+
         return {
             "query": query,
-            "result_count": len(excerpts),
+            "result_count": len(rows),
             "excerpts": [
-                {"rank": rank, "text": excerpt}
-                for rank, excerpt in enumerate(excerpts, start=1)
+                {
+                    "rank": rank,
+                    "chunk_index": chunk_index,
+                    "text": chunk_text,
+                    "similarity": float(similarity),
+                }
+                for rank, (chunk_index, chunk_text, similarity) in enumerate(
+                    rows,
+                    start=1,
+                )
             ],
         }
 
@@ -439,7 +452,7 @@ def run_document_agent(
     *,
     file_name,
     document_metadata,
-    vector_index,
+    document_id,
     chunks,
     chat_history=None,
     max_tool_rounds=MAX_TOOL_ROUNDS,
@@ -498,7 +511,7 @@ def run_document_agent(
                     arguments,
                     file_name=file_name,
                     document_metadata=document_metadata,
-                    vector_index=vector_index,
+                    document_id=document_id,
                     chunks=chunks,
                 )
                 tool_trace.append(

@@ -1,7 +1,5 @@
 from qa_engine import get_embedding_model
-import faiss
 import numpy as np
-import re
 
 # Chunk the document into smaller overlapping windows
 def chunk_text(text, chunk_size=300, overlap=50):
@@ -19,10 +17,3 @@ def embed_chunks(chunks):
     model = get_embedding_model()
     embeddings = model.encode(chunks)
     return np.array(embeddings)
-
-# Store the embeddings in FAISS
-def build_faiss_index(embeddings):
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings)
-    return index

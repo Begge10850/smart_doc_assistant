@@ -1,5 +1,4 @@
 import os
-import numpy as np
 from openai import OpenAI
 import streamlit as st
 
@@ -42,30 +41,6 @@ def get_embedding_model():
     from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer("all-mpnet-base-v2")
-
-# FAISS vector search
-def search_index(user_question, index, chunks, top_k=3):
-    if not chunks or top_k <= 0:
-        return []
-
-    model = get_embedding_model()
-    question_embedding = model.encode([user_question])
-
-    indexed_chunks = int(getattr(index, "ntotal", len(chunks)))
-    result_count = min(top_k, len(chunks), indexed_chunks)
-    if result_count <= 0:
-        return []
-
-    _, result_indexes = index.search(
-        np.array(question_embedding),
-        result_count,
-    )
-    matched_chunks = [
-        chunks[int(chunk_index)]
-        for chunk_index in result_indexes[0]
-        if 0 <= int(chunk_index) < len(chunks)
-    ]
-    return matched_chunks
 
 # Ask GPT using OpenAI client
 def answer_question_with_gpt(question, context_chunks, chat_history=None):

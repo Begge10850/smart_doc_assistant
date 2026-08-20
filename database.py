@@ -207,6 +207,27 @@ def save_document_chunks(
 
         connection.commit()
 
+
+def document_has_embeddings(document_id):
+    """Return whether PostgreSQL has an embedded chunk for this document."""
+
+    database_url = get_database_url()
+
+    query = """
+        select exists (
+            select 1
+            from document_chunks
+            where document_id = %s
+              and embedding is not null
+        );
+    """
+
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (document_id,))
+            return cursor.fetchone()[0]
+
+
 def search_document_chunks(
     *,
     document_id,

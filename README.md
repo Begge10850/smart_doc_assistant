@@ -24,7 +24,7 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 - 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and automatically selects OpenAI Vision for images and scanned PDFs
 - ⚡ **Concurrent First-Pass Processing** — Extracts directly from the original upload while S3 storage runs in parallel, avoiding an immediate S3 re-download
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
-- 🔍 **Vector Search** — Uses FAISS to retrieve relevant context for question answering
+- 🔍 **Vector Search** — Uses PostgreSQL with pgvector to retrieve relevant context for question answering
 - 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
 - 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
 - 📋 **Structured Incident Cases** — Converts document facts into a validated case contract and applies deterministic policy, evidence, and deadline checks
@@ -53,7 +53,7 @@ This assistant is ideal for:
 | `boto3`               | AWS S3 storage                      |
 | `pdfplumber`, `docx`, `PyMuPDF` | Text, annotation, image, and scanned-PDF preparation |
 | `sentence-transformers` | Text embeddings                   |
-| `faiss-cpu`           | Vector search                       |
+| `pgvector`            | PostgreSQL vector search            |
 | `openai`              | Document Q&A, agent tool selection, and automatic vision transcription |
 | `psycopg`             | PostgreSQL document persistence        |
 | `python-dotenv`       | Local environment setup (optional)  |
@@ -66,7 +66,7 @@ This assistant is ideal for:
 |-----------------------|--------------------------------------|
 | rag_pipeline.py       | Inspects files and selects local or vision extraction |
 | s3_upload.py          | Uploads file to AWS S3               |
-| vector_store.py       | Chunking + FAISS index               |
+| vector_store.py       | Document chunking and embedding      |
 | qa_engine.py          | GPT Q&A engine                       |
 | agent_engine.py       | Bounded read-only document agent and tool controller |
 | policy_store.py       | Read-only fictional carrier-policy lookup |
