@@ -21,3 +21,5 @@ openai>=1.0.0
 python-dotenv  # optional: only used if st.secrets not available
 
 psycopg[binary]
+
+pgvector==0.5.0

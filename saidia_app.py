@@ -18,7 +18,7 @@ from case_handoff import CaseHandoffError, send_case_to_make
 from rag_pipeline import process_document
 from s3_upload import S3UploadError, upload_to_s3
 from vector_store import build_faiss_index, chunk_text, embed_chunks
-from database import upsert_document
+from database import save_document_chunks, upsert_document
 
 
 # Fix asyncio initialization for environments that do not provide a loop.
@@ -35,6 +35,7 @@ DOCUMENT_STATE_KEYS = [
     "processed_doc_hash",
     "processed_file_name",
     "s3_object_key",
+    "document_id",
     "extracted_text",
     "document_metadata",
     "chunks",
@@ -312,6 +313,7 @@ if st.session_state.get("processing_requested"):
                 extracted_character_count=document_metadata.get(
                     "extracted_character_count"
                 ),
+                extracted_text=extracted_text,
                 processing_status="processed",
             )
             processing_timings["PostgreSQL persistence"] = (
@@ -501,9 +503,22 @@ if st.session_state.get("processed_doc_hash"):
                 try:
                     if vector_index is None:
                         index_started_at = time.perf_counter()
+
                         embeddings = embed_chunks(chunks)
+
+                        save_document_chunks(
+                            document_id=st.session_state.document_id,
+                            chunks=chunks,
+                            embeddings=embeddings,
+                            embedding_model="sentence-transformers/all-mpnet-base-v2",
+                        )
+
                         vector_index = build_faiss_index(embeddings)
                         st.session_state.vector_index = vector_index
+
+                        st.session_state.setdefault("processing_timings", {})[
+                            "Semantic index (first chat)"
+                        ] = time.perf_counter() - index_started_at
                         st.session_state.setdefault("processing_timings", {})[
                             "Semantic index (first chat)"
                         ] = time.perf_counter() - index_started_at
