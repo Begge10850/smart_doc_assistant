@@ -3,6 +3,7 @@
     "policy_id": "northstar-parcel-damage-eu-v1",
     "title": "NorthStar Parcel EU Damage Claim Policy",
     "carrier": "NorthStar Parcel",
+    "carrier_aliases": ["Northstar Parcel Co.", "Northstar Parcel Company"],
     "countries": ["France", "Germany"],
     "incident_type": "parcel_damage",
     "reporting_window_days": 7,

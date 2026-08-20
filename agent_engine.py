@@ -1,4 +1,5 @@
 import json
+import re
 
 from openai import OpenAI
 
@@ -69,6 +70,45 @@ INCIDENT_EXTRACTION_INSTRUCTIONS = (
     "List only evidence that the document explicitly says was supplied. Do not "
     "apply carrier policies, calculate deadlines, decide liability, or invent facts."
 )
+
+
+EVIDENCE_LABEL_PATTERN = re.compile(
+    r"^\s*(?:[-*•]\s*)?evidence\s+"
+    r"(?:available|supplied|provided|attached|enclosed)\s*[:\-]\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _explicitly_labeled_evidence(document_text):
+    """Return evidence stated on explicit evidence-label lines in the document."""
+    evidence = []
+    for line in str(document_text or "").splitlines():
+        match = EVIDENCE_LABEL_PATTERN.match(line)
+        if not match:
+            continue
+        for item in re.split(r"\s*(?:;|,|\|)\s*", match.group(1)):
+            cleaned = item.strip(" \t-–—•.")
+            if cleaned and cleaned.casefold() not in {
+                existing.casefold() for existing in evidence
+            }:
+                evidence.append(cleaned)
+    return evidence
+
+
+def _reconcile_explicit_evidence(facts, document_text):
+    """Merge deterministic labeled evidence that structured extraction omitted."""
+    supplied = facts.get("evidence_supplied")
+    if not isinstance(supplied, list):
+        return facts
+
+    merged = list(supplied)
+    existing = {str(item).strip().casefold() for item in merged}
+    for item in _explicitly_labeled_evidence(document_text):
+        if item.casefold() not in existing:
+            merged.append(item)
+            existing.add(item.casefold())
+    facts["evidence_supplied"] = merged
+    return facts
 
 
 DOCUMENT_TOOLS = [
@@ -219,7 +259,7 @@ def extract_incident_facts(document_text):
             raise DocumentAgentError(
                 "The incident extractor returned an invalid case structure."
             )
-        return facts
+        return _reconcile_explicit_evidence(facts, text)
     except DocumentAgentError:
         raise
     except (json.JSONDecodeError, TypeError, ValueError) as exc:

@@ -154,6 +154,42 @@ class AgentLoopTests(unittest.TestCase):
         self.assertTrue(response_format["strict"])
         self.assertFalse(response_format["schema"]["additionalProperties"])
 
+    def test_explicit_evidence_available_is_merged_when_model_omits_it(self):
+        facts = {
+            "is_logistics_incident": True,
+            "relevance_reason": "A concrete damaged-parcel incident is described.",
+            "incident_id": "INC-013",
+            "tracking_number": "NSP-FR-013",
+            "carrier": "Northstar Parcel Co.",
+            "country": "France",
+            "incident_type": "parcel_damage",
+            "delivery_date": "2026-08-09",
+            "reported_date": "2026-08-10",
+            "declared_value": "EUR 120.00",
+            "evidence_supplied": [],
+            "factual_summary": "A damaged parcel was reported.",
+            "unresolved_fields": [],
+        }
+
+        class FakeResponses:
+            def create(self, **_kwargs):
+                return types.SimpleNamespace(output_text=json.dumps(facts))
+
+        fake_client = types.SimpleNamespace(responses=FakeResponses())
+        with patch.object(
+            agent_engine,
+            "_read_openai_settings",
+            return_value=("test-key", "test-model"),
+        ), patch.object(agent_engine, "OpenAI", return_value=fake_client):
+            result = agent_engine.extract_incident_facts(
+                "Evidence available: Commercial invoice, damage photographs"
+            )
+
+        self.assertEqual(
+            result["evidence_supplied"],
+            ["Commercial invoice", "damage photographs"],
+        )
+
     def test_non_incident_document_is_rejected_before_policy_lookup(self):
         facts = {
             "is_logistics_incident": False,

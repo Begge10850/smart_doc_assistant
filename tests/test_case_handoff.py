@@ -75,6 +75,10 @@ class CaseHandoffTests(unittest.TestCase):
             "INC-002",
         )
         self.assertEqual(
+            captured_request["event"]["case"]["evidence_supplied"],
+            ["Commercial invoice"],
+        )
+        self.assertEqual(
             captured_request["headers"]["Idempotency-Key"],
             "handoff-case-f717c1c08bbc2d65",
         )

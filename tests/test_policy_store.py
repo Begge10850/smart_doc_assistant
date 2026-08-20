@@ -30,6 +30,28 @@ class PolicyStoreTests(unittest.TestCase):
         self.assertEqual(result["match_count"], 0)
         self.assertEqual(result["policies"], [])
 
+    def test_explicit_northstar_company_alias_matches_policy(self):
+        result = search_carrier_policies(
+            "Northstar Parcel Co.",
+            "France",
+            "parcel_damage",
+        )
+
+        self.assertEqual(result["match_count"], 1)
+        self.assertEqual(
+            result["policies"][0]["carrier"],
+            "NorthStar Parcel",
+        )
+
+    def test_similar_unlisted_carrier_does_not_match(self):
+        result = search_carrier_policies(
+            "Northstar Parcels",
+            "France",
+            "parcel_damage",
+        )
+
+        self.assertEqual(result["match_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

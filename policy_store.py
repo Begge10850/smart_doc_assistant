@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 
@@ -10,7 +11,8 @@ class PolicyStoreError(RuntimeError):
 
 
 def _normalize(value):
-    return " ".join(str(value or "").lower().replace("_", " ").split())
+    words_only = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold())
+    return " ".join(words_only.split())
 
 
 def load_carrier_policies():
@@ -35,12 +37,17 @@ def search_carrier_policies(carrier, country, incident_type):
     matches = []
 
     for policy in load_carrier_policies():
+        policy_carriers = {
+            _normalize(name)
+            for name in [policy.get("carrier"), *policy.get("carrier_aliases", [])]
+            if name
+        }
         policy_countries = {
             _normalize(policy_country)
             for policy_country in policy.get("countries", [])
         }
         if (
-            _normalize(policy.get("carrier")) == normalized_carrier
+            normalized_carrier in policy_carriers
             and normalized_country in policy_countries
             and _normalize(policy.get("incident_type"))
             == normalized_incident_type
