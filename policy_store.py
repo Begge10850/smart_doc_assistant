@@ -1,65 +1,73 @@
-import json
-import re
-from pathlib import Path
-
-
-POLICY_FILE = Path(__file__).resolve().parent / "policies" / "carrier_policies.json"
+from database import find_carrier_policies
 
 
 class PolicyStoreError(RuntimeError):
-    """Raised when the local fictional policy store cannot be read."""
-
-
-def _normalize(value):
-    words_only = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold())
-    return " ".join(words_only.split())
-
-
-def load_carrier_policies():
-    """Load the small, version-controlled fictional carrier-policy catalogue."""
-    try:
-        with POLICY_FILE.open("r", encoding="utf-8") as policy_stream:
-            policies = json.load(policy_stream)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise PolicyStoreError("The local carrier-policy store could not be read.") from exc
-
-    if not isinstance(policies, list):
-        raise PolicyStoreError("The local carrier-policy store has an invalid format.")
-
-    return policies
+    """Raised when the PostgreSQL policy store cannot be read."""
 
 
 def search_carrier_policies(carrier, country, incident_type):
     """Return policies matching explicit incident facts supplied by the agent."""
-    normalized_carrier = _normalize(carrier)
-    normalized_country = _normalize(country)
-    normalized_incident_type = _normalize(incident_type)
-    matches = []
 
-    for policy in load_carrier_policies():
-        policy_carriers = {
-            _normalize(name)
-            for name in [policy.get("carrier"), *policy.get("carrier_aliases", [])]
-            if name
-        }
-        policy_countries = {
-            _normalize(policy_country)
-            for policy_country in policy.get("countries", [])
-        }
-        if (
-            normalized_carrier in policy_carriers
-            and normalized_country in policy_countries
-            and _normalize(policy.get("incident_type"))
-            == normalized_incident_type
-        ):
-            matches.append(policy)
+    try:
+        rows = find_carrier_policies(
+            carrier=carrier,
+            country=country,
+            incident_type=incident_type,
+        )
+    except Exception as exc:
+        raise PolicyStoreError(
+            "The PostgreSQL carrier-policy store could not be read."
+        ) from exc
+
+    policies = []
+
+    for row in rows:
+        (
+            db_id,
+            policy_id,
+            title,
+            canonical_carrier,
+            countries,
+            matched_incident_type,
+            effective_date,
+            deadline_days,
+            deadline_basis,
+            additional_timing_rules,
+            required_evidence,
+            handling_guidance,
+            policy_text,
+            fictional_evaluation_policy,
+        ) = row
+
+        policies.append(
+            {
+                "db_id": db_id,
+                "policy_id": policy_id,
+                "title": title,
+                "carrier": canonical_carrier,
+                "countries": countries,
+                "incident_type": matched_incident_type,
+                "effective_date": (
+                    effective_date.isoformat()
+                    if effective_date
+                    else None
+                ),
+                "reporting_window_days": deadline_days,
+                "deadline_basis": deadline_basis,
+                "additional_timing_rules": additional_timing_rules,
+                "required_evidence": required_evidence,
+                "handling_guidance": handling_guidance,
+                "policy_text": policy_text,
+                "fictional_evaluation_policy": fictional_evaluation_policy,
+            }
+        )
 
     return {
         "carrier": carrier,
         "country": country,
         "incident_type": incident_type,
-        "match_count": len(matches),
-        "policies": matches,
+        "match_count": len(policies),
+        "policies": policies,
         "notice": (
             "These are fictional evaluation policies stored with the Saidia project, "
             "not verified real-world carrier terms."

@@ -266,3 +266,176 @@ def search_document_chunks(
             rows = cursor.fetchall()
 
     return rows
+
+def save_policy_chunks(
+    *,
+    policy_id,
+    chunks,
+    embeddings,
+    embedding_model,
+):
+    """Persist policy chunks and their embeddings in PostgreSQL."""
+
+    if len(chunks) != len(embeddings):
+        raise ValueError(
+            "The number of chunks must match the number of embeddings."
+        )
+
+    database_url = get_database_url()
+
+    query = """
+        insert into policy_chunks (
+            policy_id,
+            chunk_index,
+            chunk_text,
+            character_count,
+            embedding,
+            embedding_model
+        )
+        values (
+            %(policy_id)s,
+            %(chunk_index)s,
+            %(chunk_text)s,
+            %(character_count)s,
+            %(embedding)s,
+            %(embedding_model)s
+        )
+        on conflict (policy_id, chunk_index)
+        do update set
+            chunk_text = excluded.chunk_text,
+            character_count = excluded.character_count,
+            embedding = excluded.embedding,
+            embedding_model = excluded.embedding_model;
+    """
+
+    with psycopg.connect(database_url) as connection:
+        register_vector(connection)
+
+        with connection.cursor() as cursor:
+            for chunk_index, (chunk, embedding) in enumerate(
+                zip(chunks, embeddings)
+            ):
+                cursor.execute(
+                    query,
+                    {
+                        "policy_id": policy_id,
+                        "chunk_index": chunk_index,
+                        "chunk_text": chunk,
+                        "character_count": len(chunk),
+                        "embedding": Vector(embedding),
+                        "embedding_model": embedding_model,
+                    },
+                )
+
+        connection.commit()
+
+
+def policy_has_embeddings(policy_id):
+    """Return whether PostgreSQL has an embedded chunk for this policy."""
+
+    database_url = get_database_url()
+
+    query = """
+        select exists (
+            select 1
+            from policy_chunks
+            where policy_id = %s
+              and embedding is not null
+        );
+    """
+
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (policy_id,))
+            return cursor.fetchone()[0]
+
+
+def search_policy_chunks(
+    *,
+    policy_id,
+    query_embedding,
+    limit=4,
+):
+    """Return the policy chunks most semantically similar to a query."""
+
+    database_url = get_database_url()
+
+    query = """
+        select
+            chunk_index,
+            chunk_text,
+            1 - (embedding <=> %(query_embedding)s) as similarity
+        from policy_chunks
+        where policy_id = %(policy_id)s
+          and embedding is not null
+        order by embedding <=> %(query_embedding)s
+        limit %(limit)s;
+    """
+
+    with psycopg.connect(database_url) as connection:
+        register_vector(connection)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                {
+                    "policy_id": policy_id,
+                    "query_embedding": Vector(query_embedding),
+                    "limit": limit,
+                },
+            )
+
+            rows = cursor.fetchall()
+
+    return rows
+
+def find_carrier_policies(
+    *,
+    carrier,
+    country,
+    incident_type,
+):
+    """Return structured carrier policies matching explicit incident facts."""
+
+    database_url = get_database_url()
+
+    query = """
+        select
+            cp.id,
+            cp.policy_id,
+            cp.title,
+            c.name as carrier,
+            cp.countries,
+            cp.incident_type,
+            cp.effective_date,
+            cp.deadline_days,
+            cp.deadline_basis,
+            cp.additional_timing_rules,
+            cp.required_evidence,
+            cp.handling_guidance,
+            cp.policy_text,
+            cp.fictional_evaluation_policy
+        from carrier_policies cp
+        join carriers c
+            on c.id = cp.carrier_id
+        where lower(c.name) = lower(%(carrier)s)
+          and cp.countries ? %(country)s
+          and lower(cp.incident_type) = lower(%(incident_type)s)
+          and c.active = true
+        order by cp.id;
+    """
+
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                {
+                    "carrier": carrier,
+                    "country": country,
+                    "incident_type": incident_type,
+                },
+            )
+
+            rows = cursor.fetchall()
+
+    return rows
