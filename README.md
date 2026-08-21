@@ -1,6 +1,8 @@
 # 📄 Saidia Smart Document Assistant
 
-Saidia is a secure, GPT-powered document assistant that allows users to upload documents, process them privately, and ask natural language questions — all within a clean, private, and user-friendly web app.
+Saidia is an internal, GPT-powered document assistant for one organisation. It processes logistics incidents involving multiple external carriers, evaluates them against carrier-specific policies, and supports document-grounded questions in a private web app.
+
+Saidia is intentionally single-organisation. Carriers are external parties associated with incidents and policies; they are not tenants, customer workspaces, or organisation boundaries.
 
 👉 **Try the live app here:** [Launch Saidia Smart Assistant](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
 
@@ -35,13 +37,16 @@ Saidia is a secure, GPT-powered document assistant that allows users to upload d
 
 ---
 
-## 💼 Use Case Example
+## 💼 Product Scope
 
-This assistant is ideal for:
-- **HR departments** to make company handbooks searchable
-- **Legal teams** to answer questions from contracts or policies
-- **Internal teams** to process and search technical documentation
-- **Researchers** to query long articles and reports
+Saidia supports one internal organisation handling:
+
+- many logistics incidents;
+- many external carriers;
+- carrier-specific policies by country and incident type;
+- structured case handoff for human operational review.
+
+Carrier names extracted from uploaded documents may vary, so the local evaluation-policy store keeps a small explicit alias mapping. This is input canonicalisation for external carrier names, not multi-tenant organisation modelling.
 
 ---
 
