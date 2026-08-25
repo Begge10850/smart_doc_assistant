@@ -253,6 +253,20 @@ incident_type = st.selectbox(
     ),
 )
 
+customer_email = st.text_input(
+    "Email",
+    placeholder="Enter the email address we should use for this case",
+)
+
+additional_information = st.text_area(
+    "Additional information",
+    placeholder=(
+        "Describe what happened and include any details that may help us "
+        "review the delivery problem"
+    ),
+    height=160,
+)
+
 
 with st.sidebar:
     st.header("📤 Upload Document")
