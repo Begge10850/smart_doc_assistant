@@ -218,10 +218,39 @@ def render_incident_case(incident_case):
         )
 
 
-st.set_page_config(page_title="Saidia Smart Document Assistant", layout="wide")
-st.title("📄 Saidia Smart Document Assistant")
+st.set_page_config(page_title="Saidia Claims Assistant", layout="wide")
+st.title("Saidia")
 st.markdown(
-    "Upload a document once, then continue a grounded conversation about it."
+    "Report a delivery problem and provide the information needed for your "
+    "case to be reviewed."
+)
+
+st.subheader("Report a Delivery Problem")
+
+claimant_role = st.radio(
+    "Are you the sender or recipient?",
+    options=["Recipient", "Sender"],
+    horizontal=True,
+)
+
+tracking_number = st.text_input(
+    "Tracking number",
+    placeholder="Enter your parcel tracking number",
+)
+
+complaint_type_labels = {
+    "parcel_damage": "Package arrived damaged",
+    "lost_parcel": "Package is lost",
+    "late_delivery": "Package arrived late",
+    "partial_loss": "Some items are missing",
+    "non_delivery": "Package shows delivered but was not received",
+}
+incident_type = st.selectbox(
+    "What happened?",
+    options=[None, *complaint_type_labels],
+    format_func=lambda value: (
+        "Select a problem" if value is None else complaint_type_labels[value]
+    ),
 )
 
 
