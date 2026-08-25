@@ -247,10 +247,10 @@ complaint_type_labels = {
 }
 incident_type = st.selectbox(
     "What happened?",
-    options=[None, *complaint_type_labels],
-    format_func=lambda value: (
-        "Select a problem" if value is None else complaint_type_labels[value]
-    ),
+    options=list(complaint_type_labels),
+    index=None,
+    placeholder="Select a problem",
+    format_func=lambda value: complaint_type_labels[value],
 )
 
 customer_email = st.text_input(
