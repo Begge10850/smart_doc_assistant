@@ -258,6 +258,13 @@ customer_email = st.text_input(
     placeholder="Enter the email address we should use for this case",
 )
 
+evidence_photo = st.file_uploader(
+    "Photo of the parcel or goods",
+    type=["jpg", "jpeg", "png"],
+    help="A JPG or PNG photo is required before the complaint can be submitted.",
+    key="customer_evidence_photo",
+)
+
 additional_information = st.text_area(
     "Additional information",
     placeholder=(
@@ -267,12 +274,12 @@ additional_information = st.text_area(
     height=160,
 )
 
-
-with st.sidebar:
-    st.header("📤 Upload Document")
+with st.expander("Existing document processing", expanded=False):
+    st.markdown("**📤 Upload Document**")
     uploaded_file = st.file_uploader(
         "Choose a PDF, DOCX, TXT, JPG, JPEG, or PNG file",
         type=["pdf", "txt", "docx", "jpg", "jpeg", "png"],
+        key="internal_document_upload",
     )
 
     st.caption(
