@@ -39,6 +39,95 @@ def test_database_connection():
             cursor.execute("SELECT version();")
             return cursor.fetchone()[0]
 
+
+def create_customer_case(complaint):
+    """Persist a submitted case and its initial evidence inventory."""
+    case_query = """
+        insert into customer_cases (
+            case_reference, reported_at, status, claimant_role, tracking_number,
+            complaint_type, customer_email, additional_information,
+            downstream_processing_status
+        ) values (
+            %(case_reference)s, %(reported_at)s, %(status)s, %(claimant_role)s,
+            %(tracking_number)s, %(complaint_type)s, %(customer_email)s,
+            %(additional_information)s, %(downstream_processing_status)s
+        )
+        returning id;
+    """
+    evidence_query = """
+        insert into customer_case_evidence (
+            customer_case_id, original_file_name, content_type, size_bytes
+        ) values (%s, %s, %s, %s)
+        returning id;
+    """
+
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(case_query, complaint)
+            customer_case_id = cursor.fetchone()[0]
+            for evidence in complaint["evidence"]:
+                cursor.execute(
+                    evidence_query,
+                    (
+                        customer_case_id,
+                        evidence["file_name"],
+                        evidence.get("content_type"),
+                        evidence["size_bytes"],
+                    ),
+                )
+                evidence["evidence_id"] = cursor.fetchone()[0]
+        connection.commit()
+
+    complaint["customer_case_id"] = customer_case_id
+    return customer_case_id
+
+
+def update_customer_case_status(case_reference, status, processing_error=None):
+    """Update the durable lifecycle state for a customer case."""
+    query = """
+        update customer_cases
+        set downstream_processing_status = %s,
+            processing_error = %s,
+            updated_at = now()
+        where case_reference = %s;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (status, processing_error, case_reference))
+        connection.commit()
+
+
+def update_customer_evidence(evidence):
+    """Persist storage, routing, and AI-observation fields for one evidence item."""
+    query = """
+        update customer_case_evidence
+        set evidence_kind = %(evidence_kind)s,
+            s3_object_key = %(s3_object_key)s,
+            upload_status = %(upload_status)s,
+            processing_status = %(processing_status)s,
+            document_id = %(document_id)s,
+            vision_observations = %(vision_observations)s,
+            processing_error = %(processing_error)s,
+            updated_at = now()
+        where id = %(evidence_id)s;
+    """
+    params = {
+        "evidence_id": evidence["evidence_id"],
+        "evidence_kind": evidence.get("evidence_kind"),
+        "s3_object_key": evidence.get("s3_object_key"),
+        "upload_status": evidence.get("upload_status", "pending"),
+        "processing_status": evidence.get("processing_status", "pending"),
+        "document_id": evidence.get("document_id"),
+        "vision_observations": psycopg.types.json.Jsonb(
+            evidence.get("vision_observations")
+        ) if evidence.get("vision_observations") is not None else None,
+        "processing_error": evidence.get("processing_error"),
+    }
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+        connection.commit()
+
 def upsert_document(
     *,
     document_hash,

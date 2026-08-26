@@ -3,8 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
+import re
 import tempfile
 import time
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import streamlit as st
 
@@ -16,11 +19,15 @@ from agent_engine import (
 )
 from case_handoff import CaseHandoffError, send_case_to_make
 from rag_pipeline import process_document
-from s3_upload import S3UploadError, upload_to_s3
+from s3_upload import S3UploadError, upload_evidence_to_s3, upload_to_s3
+from vision_engine import inspect_evidence_image_bytes
 from vector_store import chunk_text, embed_chunks
 from database import (
+    create_customer_case,
     document_has_embeddings,
     save_document_chunks,
+    update_customer_case_status,
+    update_customer_evidence,
     upsert_document,
 )
 
@@ -50,6 +57,150 @@ DOCUMENT_STATE_KEYS = [
     "non_incident_message",
     "processing_timings",
 ]
+
+SUPPORTED_EVIDENCE_TYPES = ["pdf", "txt", "docx", "jpg", "jpeg", "png"]
+IMAGE_EVIDENCE_TYPES = {"jpg", "jpeg", "png"}
+COMPLAINT_TYPE_LABELS = {
+    "parcel_damage": "Package arrived damaged",
+    "lost_parcel": "Package is lost",
+    "late_delivery": "Package arrived late",
+    "partial_loss": "Some items are missing",
+    "non_delivery": "Package shows delivered but was not received",
+}
+EVIDENCE_REQUIREMENTS = {
+    "parcel_damage": "At least one JPG or PNG photo of the damaged parcel or goods",
+    "partial_loss": "At least one JPG or PNG photo of the parcel, contents, or packaging",
+}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def validate_customer_submission(
+    tracking_number, complaint_type, customer_email, evidence_files
+):
+    """Return customer-facing validation errors for a complaint submission."""
+    errors = []
+    normalized_tracking_number = tracking_number.strip()
+    normalized_email = customer_email.strip().lower()
+
+    if not normalized_tracking_number:
+        errors.append("Enter your tracking number.")
+    if complaint_type not in COMPLAINT_TYPE_LABELS:
+        errors.append("Select what happened to your delivery.")
+    if not EMAIL_PATTERN.fullmatch(normalized_email):
+        errors.append("Enter a valid email address.")
+
+    if complaint_type in EVIDENCE_REQUIREMENTS:
+        has_image = any(
+            Path(evidence_file.name).suffix.lower().lstrip(".")
+            in IMAGE_EVIDENCE_TYPES
+            for evidence_file in (evidence_files or [])
+        )
+        if not has_image:
+            errors.append(EVIDENCE_REQUIREMENTS[complaint_type] + ".")
+
+    return errors
+
+
+def build_customer_complaint(
+    claimant_role,
+    tracking_number,
+    complaint_type,
+    customer_email,
+    additional_information,
+    evidence_files,
+):
+    """Create the normalized, session-only complaint contract."""
+    reported_at = datetime.now(timezone.utc)
+    case_reference = f"CASE-{reported_at:%Y%m%d}-{uuid4().hex[:10].upper()}"
+    evidence = []
+    for evidence_file in evidence_files or []:
+        file_data = evidence_file.getvalue()
+        evidence.append(
+            {
+                "file_name": Path(evidence_file.name).name,
+                "content_type": evidence_file.type,
+                "size_bytes": len(file_data),
+                "data": file_data,
+            }
+        )
+
+    return {
+        "case_reference": case_reference,
+        "reported_at": reported_at.isoformat(),
+        "status": "submitted",
+        "claimant_role": claimant_role.strip().lower(),
+        "tracking_number": tracking_number.strip(),
+        "complaint_type": complaint_type,
+        "customer_email": customer_email.strip().lower(),
+        "additional_information": additional_information.strip(),
+        "evidence": evidence,
+        "downstream_processing_status": "not_connected",
+    }
+
+
+def process_customer_evidence(complaint):
+    """Persist originals, then route images and documents to separate pipelines."""
+    for item in complaint["evidence"]:
+        file_data = item.pop("data")
+        extension = Path(item["file_name"]).suffix.lower().lstrip(".")
+        item["evidence_kind"] = "image" if extension in IMAGE_EVIDENCE_TYPES else "document"
+        item["s3_object_key"] = upload_evidence_to_s3(
+            file_data, item["file_name"], complaint["case_reference"]
+        )
+        item["upload_status"] = "stored_private"
+
+        if item["evidence_kind"] == "image":
+            item["vision_observations"] = inspect_evidence_image_bytes(
+                file_data,
+                item["content_type"] or f"image/{extension}",
+                file_name=item["file_name"],
+            )
+            item["processing_status"] = "vision_inspected"
+            update_customer_evidence(item)
+            continue
+
+        result = process_uploaded_bytes(file_data, item["file_name"])
+        extracted_text = result["text"]
+        metadata = result["metadata"]
+        chunks = chunk_text(extracted_text)
+        if not chunks:
+            raise RuntimeError("The evidence document produced no searchable text.")
+        document_hash = hashlib.sha256(file_data).hexdigest()
+        document_id = upsert_document(
+            document_hash=document_hash,
+            original_file_name=item["file_name"],
+            s3_object_key=item["s3_object_key"],
+            content_type=item["content_type"],
+            size_bytes=item["size_bytes"],
+            document_kind=metadata.get("document_kind"),
+            extraction_method=metadata.get("extraction_method"),
+            used_vision=metadata.get("used_vision", False),
+            page_count=metadata.get("page_count"),
+            extracted_word_count=metadata.get("extracted_word_count"),
+            extracted_character_count=metadata.get("extracted_character_count"),
+            extracted_text=extracted_text,
+            processing_status="processed",
+        )
+        embeddings = embed_chunks(chunks)
+        save_document_chunks(
+            document_id=document_id,
+            chunks=chunks,
+            embeddings=embeddings,
+            embedding_model="sentence-transformers/all-mpnet-base-v2",
+        )
+        item.update({
+            "document_id": document_id,
+            "chunk_count": len(chunks),
+            "extraction_metadata": metadata,
+            "processing_status": "indexed",
+        })
+        update_customer_evidence(item)
+
+    complaint["downstream_processing_status"] = "evidence_processed"
+    update_customer_case_status(
+        complaint["case_reference"], "evidence_processed"
+    )
+    return complaint
 
 
 def clear_document_session():
@@ -227,52 +378,120 @@ st.markdown(
 
 st.subheader("Report a Delivery Problem")
 
-claimant_role = st.radio(
-    "Are you the sender or recipient?",
-    options=["Recipient", "Sender"],
-    horizontal=True,
-)
+with st.form("customer_complaint_form", clear_on_submit=False):
+    claimant_role = st.radio(
+        "Are you the sender or recipient?",
+        options=["Recipient", "Sender"],
+        horizontal=True,
+    )
+    tracking_number = st.text_input(
+        "Tracking number",
+        placeholder="Enter your parcel tracking number",
+    )
+    incident_type = st.selectbox(
+        "What happened?",
+        options=list(COMPLAINT_TYPE_LABELS),
+        index=None,
+        placeholder="Select a problem",
+        format_func=lambda value: COMPLAINT_TYPE_LABELS[value],
+    )
+    customer_email = st.text_input(
+        "Email",
+        placeholder="Enter the email address we should use for this case",
+    )
+    evidence_files = st.file_uploader(
+        "Supporting evidence",
+        type=SUPPORTED_EVIDENCE_TYPES,
+        accept_multiple_files=True,
+        help=(
+            "Upload relevant photos or documents. Damage and missing-item "
+            "complaints require at least one JPG or PNG photo."
+        ),
+        key="customer_evidence_files",
+    )
+    additional_information = st.text_area(
+        "Additional information",
+        placeholder=(
+            "Describe what happened and include any details that may help us "
+            "review the delivery problem"
+        ),
+        height=160,
+    )
+    complaint_submitted = st.form_submit_button(
+        "Submit complaint", use_container_width=True
+    )
 
-tracking_number = st.text_input(
-    "Tracking number",
-    placeholder="Enter your parcel tracking number",
-)
+if complaint_submitted:
+    validation_errors = validate_customer_submission(
+        tracking_number, incident_type, customer_email, evidence_files
+    )
+    if validation_errors:
+        for validation_error in validation_errors:
+            st.error(validation_error)
+    else:
+        complaint = build_customer_complaint(
+            claimant_role,
+            tracking_number,
+            incident_type,
+            customer_email,
+            additional_information,
+            evidence_files,
+        )
+        try:
+            with st.spinner("Securely storing and preparing your evidence..."):
+                create_customer_case(complaint)
+                complaint["downstream_processing_status"] = "processing_evidence"
+                update_customer_case_status(
+                    complaint["case_reference"], "processing_evidence"
+                )
+                st.session_state.customer_complaint = process_customer_evidence(
+                    complaint
+                )
+        except Exception as exc:
+            # Do not retain uploaded file bodies in Streamlit memory after the
+            # persistence attempt, including when a later routing step fails.
+            for evidence_item in complaint["evidence"]:
+                evidence_item.pop("data", None)
+            complaint["downstream_processing_status"] = "evidence_processing_failed"
+            complaint["processing_error"] = str(exc)
+            if complaint.get("customer_case_id"):
+                try:
+                    update_customer_case_status(
+                        complaint["case_reference"],
+                        "evidence_processing_failed",
+                        "Evidence processing did not complete.",
+                    )
+                except Exception:
+                    pass
+            st.session_state.customer_complaint = complaint
+            st.error(
+                "We could not finish preparing your evidence. Your case reference "
+                "has been retained; please retry later."
+            )
+            st.markdown(f"Case reference: **`{complaint['case_reference']}`**")
 
-complaint_type_labels = {
-    "parcel_damage": "Package arrived damaged",
-    "lost_parcel": "Package is lost",
-    "late_delivery": "Package arrived late",
-    "partial_loss": "Some items are missing",
-    "non_delivery": "Package shows delivered but was not received",
-}
-incident_type = st.selectbox(
-    "What happened?",
-    options=list(complaint_type_labels),
-    index=None,
-    placeholder="Select a problem",
-    format_func=lambda value: complaint_type_labels[value],
-)
+if (
+    st.session_state.get("customer_complaint", {}).get(
+        "downstream_processing_status"
+    )
+    == "evidence_processed"
+):
+    submitted_complaint = st.session_state.customer_complaint
+    st.success("Your complaint has been submitted successfully.")
+    st.markdown(
+        f"Your case reference is **`{submitted_complaint['case_reference']}`**. "
+        "Keep it for future correspondence."
+    )
+    st.caption(
+        "Your original evidence is stored securely and has been prepared for "
+        "human review."
+    )
 
-customer_email = st.text_input(
-    "Email",
-    placeholder="Enter the email address we should use for this case",
-)
 
-evidence_photo = st.file_uploader(
-    "Photo of the parcel or goods",
-    type=["jpg", "jpeg", "png"],
-    help="A JPG or PNG photo is required before the complaint can be submitted.",
-    key="customer_evidence_photo",
-)
-
-additional_information = st.text_area(
-    "Additional information",
-    placeholder=(
-        "Describe what happened and include any details that may help us "
-        "review the delivery problem"
-    ),
-    height=160,
-)
+# Keep the existing backend workflow intact but out of the customer experience
+# until customer submissions are connected to downstream processing.
+if not st.session_state.get("show_internal_operations", False):
+    st.stop()
 
 with st.expander("Existing document processing", expanded=False):
     st.markdown("**📤 Upload Document**")

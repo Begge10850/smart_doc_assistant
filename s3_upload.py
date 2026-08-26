@@ -2,6 +2,7 @@ from io import BytesIO
 import mimetypes
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
@@ -91,4 +92,44 @@ def upload_to_s3(file_data, file_name):
         # sensitive configuration details in their message.
         raise S3UploadError(
             f"Unexpected upload failure ({type(exc).__name__}). Check the app logs."
+        ) from exc
+
+
+def upload_evidence_to_s3(file_data, file_name, case_reference):
+    """Store an original evidence file under a private, case-scoped key."""
+    if not file_data:
+        raise S3UploadError("The selected evidence file is empty.")
+
+    safe_name = Path(file_name).name
+    object_key = (
+        f"customer-cases/{case_reference}/evidence/"
+        f"{uuid4().hex}-{safe_name}"
+    )
+    content_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+
+    try:
+        file_buffer = BytesIO(file_data)
+        _create_s3_client().upload_fileobj(
+            file_buffer,
+            S3_BUCKET,
+            object_key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "ServerSideEncryption": "AES256",
+            },
+        )
+        return object_key
+    except S3UploadError:
+        raise
+    except (NoCredentialsError, PartialCredentialsError) as exc:
+        raise S3UploadError("AWS credentials are unavailable or incomplete.") from exc
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        raise S3UploadError(
+            f"AWS {error.get('Code', 'Unknown')}: "
+            f"{error.get('Message', 'AWS rejected the upload.')}"
+        ) from exc
+    except Exception as exc:
+        raise S3UploadError(
+            f"Unexpected evidence upload failure ({type(exc).__name__})."
         ) from exc

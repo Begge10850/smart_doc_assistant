@@ -111,6 +111,17 @@ Carrier names extracted from uploaded documents may vary, so the local evaluatio
 ## Database
 - DATABASE_URL = "postgresql://..." # hosted PostgreSQL connection string; keep private
 
+Before deploying the customer complaint lifecycle, apply migrations in filename
+order to the same PostgreSQL database. Start with:
+
+```text
+migrations/001_customer_cases.sql
+```
+
+This creates durable customer-case and evidence records. Original file bodies
+remain in private S3; PostgreSQL stores case data, private S3 object keys,
+document relationships, processing status, and separate Vision observations.
+
 ## 🙌 Credits
 - Created by Treva Ogwang
 - Powered by OpenAI + Streamlit + AWS
