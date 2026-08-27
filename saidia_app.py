@@ -309,6 +309,75 @@ def prepare_customer_case_analysis(complaint):
     return analysis.to_dict()
 
 
+def complete_customer_case_processing(complaint):
+    """Prepare persisted evidence, analysis, and optional operational handoff."""
+    processing_started = time.perf_counter()
+    complaint = process_customer_evidence(complaint)
+
+    try:
+        analysis = run_customer_stage(
+            complaint["case_reference"],
+            "grounded_case_analysis",
+            prepare_customer_case_analysis,
+            complaint,
+        )
+        complaint["case_analysis"] = analysis
+        complaint["analysis_status"] = "completed"
+        save_customer_case_analysis(
+            complaint["case_reference"], analysis, "completed"
+        )
+    except (DocumentAgentError, NonIncidentDocumentError):
+        complaint["analysis_status"] = "needs_human_preparation"
+        save_customer_case_analysis(
+            complaint["case_reference"],
+            None,
+            "needs_human_preparation",
+        )
+
+    if customer_case_handoff_enabled():
+        try:
+            persisted_case = get_customer_case_for_handoff(
+                complaint["case_reference"]
+            )
+            st.session_state.customer_case_handoff_receipt = run_customer_stage(
+                complaint["case_reference"],
+                "make_handoff",
+                send_customer_case_to_make,
+                persisted_case,
+                function_kwargs={
+                    "download_url_factory": create_private_evidence_download_url,
+                },
+            )
+            complaint["downstream_processing_status"] = "handoff_accepted"
+            update_customer_case_status(
+                complaint["case_reference"], "handoff_accepted"
+            )
+        except Exception:
+            # The report remains safely received when an internal handoff fails.
+            complaint["downstream_processing_status"] = "handoff_failed"
+            update_customer_case_status(
+                complaint["case_reference"],
+                "handoff_failed",
+                "The Make handoff did not complete.",
+            )
+    else:
+        complaint["downstream_processing_status"] = "ready_for_handoff"
+        update_customer_case_status(
+            complaint["case_reference"], "ready_for_handoff"
+        )
+
+    record_processing_event(
+        case_reference=complaint["case_reference"],
+        stage="submission_to_ready",
+        duration_ms=round(
+            (time.perf_counter() - processing_started) * 1000,
+            2,
+        ),
+        status="completed",
+    )
+    return complaint
+
+
 def clear_document_session():
     """Forget the processed document and its conversation."""
     for key in DOCUMENT_STATE_KEYS:
@@ -576,6 +645,23 @@ elif customer_intake_view == "form":
             "Submit complaint", use_container_width=True
         )
 
+elif customer_intake_view == "processing":
+    processing_complaint = st.session_state.get("customer_complaint")
+    if processing_complaint:
+        st.success("Report received")
+        st.markdown(
+            "Your case reference is "
+            f"**`{processing_complaint['case_reference']}`**. Keep this reference "
+            "for future correspondence."
+        )
+        st.info(
+            "Preparing your evidence and case details for review. This page "
+            "will update automatically when preparation is complete."
+        )
+    else:
+        st.session_state.customer_intake_view = "landing"
+        st.rerun()
+
 else:
     submitted_complaint = st.session_state.get("customer_complaint")
     if submitted_complaint:
@@ -585,10 +671,20 @@ else:
             f"**`{submitted_complaint['case_reference']}`**. Keep this reference "
             "for future correspondence."
         )
-        st.caption(
-            "Your original evidence is stored securely and is available for "
-            "human review."
-        )
+        if (
+            submitted_complaint.get("downstream_processing_status")
+            == "evidence_processing_failed"
+        ):
+            st.warning(
+                "Your report is recorded, but evidence preparation is taking "
+                "longer than expected. Keep your case reference; the case can "
+                "still be followed up safely."
+            )
+        else:
+            st.caption(
+                "Your original evidence is stored securely and is available for "
+                "human review."
+            )
         st.button(
             "Report another problem",
             type="primary",
@@ -624,115 +720,54 @@ if customer_intake_view == "form" and complaint_submitted:
             evidence_files,
         )
         try:
-            submission_processing_started = time.perf_counter()
             case_creation_started = time.perf_counter()
             create_customer_case(complaint)
             record_processing_event(
-                    case_reference=complaint["case_reference"],
-                    stage="case_creation",
-                    duration_ms=round(
-                        (time.perf_counter() - case_creation_started) * 1000, 2
-                    ),
-                    status="completed",
+                case_reference=complaint["case_reference"],
+                stage="case_creation",
+                duration_ms=round(
+                    (time.perf_counter() - case_creation_started) * 1000, 2
+                ),
+                status="completed",
             )
             complaint["downstream_processing_status"] = "processing_evidence"
             update_customer_case_status(
                 complaint["case_reference"], "processing_evidence"
             )
-            st.session_state.customer_complaint = process_customer_evidence(
-                complaint
-            )
-            try:
-                analysis = run_customer_stage(
-                        complaint["case_reference"],
-                        "grounded_case_analysis",
-                        prepare_customer_case_analysis,
-                        complaint,
-                )
-                complaint["case_analysis"] = analysis
-                complaint["analysis_status"] = "completed"
-                save_customer_case_analysis(
-                    complaint["case_reference"], analysis, "completed"
-                )
-            except (DocumentAgentError, NonIncidentDocumentError):
-                complaint["analysis_status"] = "needs_human_preparation"
-                save_customer_case_analysis(
-                    complaint["case_reference"],
-                    None,
-                    "needs_human_preparation",
-                )
-            if customer_case_handoff_enabled():
-                try:
-                    persisted_case = get_customer_case_for_handoff(
-                        complaint["case_reference"]
-                    )
-                    st.session_state.customer_case_handoff_receipt = run_customer_stage(
-                            complaint["case_reference"],
-                            "make_handoff",
-                            send_customer_case_to_make,
-                            persisted_case,
-                            function_kwargs={
-                                "download_url_factory": create_private_evidence_download_url,
-                            },
-                    )
-                    complaint["downstream_processing_status"] = "handoff_accepted"
-                    update_customer_case_status(
-                        complaint["case_reference"], "handoff_accepted"
-                    )
-                except Exception:
-                    # Submission and evidence storage remain successful even
-                    # when the operational handoff needs an internal retry.
-                    complaint["downstream_processing_status"] = "handoff_failed"
-                    update_customer_case_status(
-                        complaint["case_reference"],
-                        "handoff_failed",
-                        "The Make handoff did not complete.",
-                    )
-            else:
-                complaint["downstream_processing_status"] = "ready_for_handoff"
-                update_customer_case_status(
-                    complaint["case_reference"], "ready_for_handoff"
-                )
-            record_processing_event(
-                case_reference=complaint["case_reference"],
-                stage="submission_to_ready",
-                duration_ms=round(
-                    (time.perf_counter() - submission_processing_started) * 1000,
-                    2,
-                ),
-                status="completed",
-            )
-            st.session_state.customer_complaint = complaint
-            # Widget state cannot be mutated after its widgets are instantiated
-            # in the same run. Clear it at the beginning of the success rerun.
-            st.session_state.reset_customer_form_on_rerun = True
-            st.session_state.customer_intake_view = "success"
         except Exception as exc:
-            # Do not retain uploaded file bodies in Streamlit memory after the
-            # persistence attempt, including when a later routing step fails.
+            for evidence_item in complaint["evidence"]:
+                evidence_item.pop("data", None)
+            st.error(
+                "We could not receive your report. Please check your connection "
+                "and try again."
+            )
+        else:
+            st.session_state.customer_complaint = complaint
+            st.session_state.reset_customer_form_on_rerun = True
+            st.session_state.customer_intake_view = "processing"
+            st.rerun()
+
+if customer_intake_view == "processing":
+    complaint = st.session_state.get("customer_complaint")
+    if complaint:
+        try:
+            complaint = complete_customer_case_processing(complaint)
+        except Exception as exc:
             for evidence_item in complaint["evidence"]:
                 evidence_item.pop("data", None)
             complaint["downstream_processing_status"] = "evidence_processing_failed"
             complaint["processing_error"] = str(exc)
-            if complaint.get("customer_case_id"):
-                try:
-                    update_customer_case_status(
-                        complaint["case_reference"],
-                        "evidence_processing_failed",
-                        "Evidence processing did not complete.",
-                    )
-                except Exception:
-                    pass
-            st.session_state.customer_complaint = complaint
-            st.error(
-                "We could not finish preparing your evidence. Your case reference "
-                "has been retained; please retry later."
-            )
-            st.markdown(f"Case reference: **`{complaint['case_reference']}`**")
-        else:
-            # Keep Streamlit's control-flow exception outside the processing
-            # error handler so a successful rerun cannot be shown as a failure.
-            st.rerun()
+            try:
+                update_customer_case_status(
+                    complaint["case_reference"],
+                    "evidence_processing_failed",
+                    "Evidence processing did not complete.",
+                )
+            except Exception:
+                pass
+        st.session_state.customer_complaint = complaint
+        st.session_state.customer_intake_view = "success"
+        st.rerun()
 
 # Keep the existing backend workflow intact but out of the customer experience
 # until customer submissions are connected to downstream processing.
