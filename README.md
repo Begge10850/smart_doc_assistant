@@ -23,7 +23,7 @@ Saidia is intentionally single-organisation. Carriers are external parties assoc
 - 🔒 **Secure Document Upload** — Files are stored in AWS S3 bucket
 - 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
 - 📄 **Supported File Types** — PDF, DOCX, TXT, JPG, JPEG, and PNG
-- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and automatically selects OpenAI Vision for images and scanned PDFs
+- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and OpenAI Vision only as an OCR fallback for scanned text documents
 - ⚡ **Concurrent First-Pass Processing** — Extracts directly from the original upload while S3 storage runs in parallel, avoiding an immediate S3 re-download
 - 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
 - 🔍 **Vector Search** — Uses PostgreSQL with pgvector to retrieve relevant context for question answering
@@ -69,6 +69,7 @@ Carrier names extracted from uploaded documents may vary, so the local evaluatio
 .
 | saidia_app.py         | Main Streamlit app                   |
 |-----------------------|--------------------------------------|
+| customer_intake.py    | Pure complaint validation and normalization |
 | rag_pipeline.py       | Inspects files and selects local or vision extraction |
 | s3_upload.py          | Uploads file to AWS S3               |
 | vector_store.py       | Document chunking and embedding      |
@@ -84,7 +85,7 @@ Carrier names extracted from uploaded documents may vary, so the local evaluatio
 📌 Notes
 - For digital documents, only retrieved document chunks are sent to OpenAI when answering questions.
 
-- Images and rendered pages from scanned PDFs are sent to OpenAI Vision automatically when usable native text is unavailable; the app displays this routing clearly.
+- Customer evidence photographs are stored unchanged in private S3 for human review and are not interpreted by AI. Rendered pages from scanned text documents may be sent to OpenAI Vision only when usable native text is unavailable; the app displays this OCR routing clearly.
 
 - Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
 
@@ -107,20 +108,40 @@ Carrier names extracted from uploaded documents may vary, so the local evaluatio
 
 ## [make]
 - WEBHOOK_URL = "https://hook.example.make.com/your_private_webhook" # keep private
+- ENABLE_CUSTOMER_CASE_HANDOFF = "false" # enable only after mapping the v1 customer event in Make
 
 ## Database
 - DATABASE_URL = "postgresql://..." # hosted PostgreSQL connection string; keep private
 
 Before deploying the customer complaint lifecycle, apply migrations in filename
-order to the same PostgreSQL database. Start with:
+order to the same PostgreSQL database:
 
 ```text
 migrations/001_customer_cases.sql
+migrations/002_case_processing_metrics.sql
 ```
 
-This creates durable customer-case and evidence records. Original file bodies
-remain in private S3; PostgreSQL stores case data, private S3 object keys,
-document relationships, processing status, and separate Vision observations.
+These create durable customer-case, evidence, grounded-analysis, lifecycle,
+and processing-metric records. Original file bodies remain in private S3;
+PostgreSQL stores case data, private S3 object keys, document relationships,
+processing status, grounded case analysis, and privacy-safe stage timings.
+
+Example performance query:
+
+```sql
+select
+    c.case_reference,
+    e.stage,
+    e.duration_ms,
+    e.status,
+    e.created_at
+from case_processing_events e
+join customer_cases c on c.id = e.customer_case_id
+order by e.created_at desc;
+```
+
+Customer evidence limits are 10 files, 10 MB per image, 20 MB per document,
+and 50 MB combined per complaint.
 
 ## 🙌 Credits
 - Created by Treva Ogwang

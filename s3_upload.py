@@ -12,6 +12,7 @@ import streamlit as st
 
 S3_BUCKET = "smart-doc-assistant-saidia"
 REGION = "eu-north-1"
+EVIDENCE_DOWNLOAD_EXPIRY_SECONDS = 900
 
 
 class S3UploadError(RuntimeError):
@@ -132,4 +133,20 @@ def upload_evidence_to_s3(file_data, file_name, case_reference):
     except Exception as exc:
         raise S3UploadError(
             f"Unexpected evidence upload failure ({type(exc).__name__})."
+        ) from exc
+
+
+def create_private_evidence_download_url(object_key):
+    """Create a short-lived URL that Make can use to attach private evidence."""
+    if not str(object_key or "").startswith("customer-cases/"):
+        raise S3UploadError("The evidence object key is invalid.")
+    try:
+        return _create_s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": object_key},
+            ExpiresIn=EVIDENCE_DOWNLOAD_EXPIRY_SECONDS,
+        )
+    except Exception as exc:
+        raise S3UploadError(
+            "A temporary private evidence link could not be created."
         ) from exc

@@ -3,11 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
-import re
 import tempfile
 import time
-from datetime import datetime, timezone
-from uuid import uuid4
 
 import streamlit as st
 
@@ -17,15 +14,35 @@ from agent_engine import (
     prepare_incident_case,
     run_document_agent,
 )
-from case_handoff import CaseHandoffError, send_case_to_make
+from case_handoff import (
+    CaseHandoffError,
+    customer_case_handoff_enabled,
+    send_case_to_make,
+    send_customer_case_to_make,
+)
+from customer_intake import (
+    COMPLAINT_TYPE_LABELS,
+    IMAGE_EVIDENCE_TYPES,
+    SUPPORTED_EVIDENCE_TYPES,
+    build_customer_complaint,
+    validate_customer_submission,
+)
 from rag_pipeline import process_document
-from s3_upload import S3UploadError, upload_evidence_to_s3, upload_to_s3
-from vision_engine import inspect_evidence_image_bytes
+from s3_upload import (
+    S3UploadError,
+    create_private_evidence_download_url,
+    upload_evidence_to_s3,
+    upload_to_s3,
+)
 from vector_store import chunk_text, embed_chunks
 from database import (
     create_customer_case,
     document_has_embeddings,
+    get_customer_case_for_handoff,
+    record_processing_event,
     save_document_chunks,
+    save_customer_case_analysis,
+    search_document_chunks,
     update_customer_case_status,
     update_customer_evidence,
     upsert_document,
@@ -58,135 +75,122 @@ DOCUMENT_STATE_KEYS = [
     "processing_timings",
 ]
 
-SUPPORTED_EVIDENCE_TYPES = ["pdf", "txt", "docx", "jpg", "jpeg", "png"]
-IMAGE_EVIDENCE_TYPES = {"jpg", "jpeg", "png"}
-COMPLAINT_TYPE_LABELS = {
-    "parcel_damage": "Package arrived damaged",
-    "lost_parcel": "Package is lost",
-    "late_delivery": "Package arrived late",
-    "partial_loss": "Some items are missing",
-    "non_delivery": "Package shows delivered but was not received",
-}
-EVIDENCE_REQUIREMENTS = {
-    "parcel_damage": "At least one JPG or PNG photo of the damaged parcel or goods",
-    "partial_loss": "At least one JPG or PNG photo of the parcel, contents, or packaging",
-}
-EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-
-
-def validate_customer_submission(
-    tracking_number, complaint_type, customer_email, evidence_files
+def run_customer_stage(
+    case_reference, stage, function, *args, evidence_id=None, function_kwargs=None
 ):
-    """Return customer-facing validation errors for a complaint submission."""
-    errors = []
-    normalized_tracking_number = tracking_number.strip()
-    normalized_email = customer_email.strip().lower()
+    """Run one case stage and persist latency without logging customer content."""
+    started_at = time.perf_counter()
+    try:
+        result = function(*args, **(function_kwargs or {}))
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        try:
+            record_processing_event(
+                case_reference=case_reference,
+                evidence_id=evidence_id,
+                stage=stage,
+                duration_ms=duration_ms,
+                status="failed",
+                error_category=type(exc).__name__,
+            )
+        except Exception:
+            pass
+        raise
 
-    if not normalized_tracking_number:
-        errors.append("Enter your tracking number.")
-    if complaint_type not in COMPLAINT_TYPE_LABELS:
-        errors.append("Select what happened to your delivery.")
-    if not EMAIL_PATTERN.fullmatch(normalized_email):
-        errors.append("Enter a valid email address.")
-
-    if complaint_type in EVIDENCE_REQUIREMENTS:
-        has_image = any(
-            Path(evidence_file.name).suffix.lower().lstrip(".")
-            in IMAGE_EVIDENCE_TYPES
-            for evidence_file in (evidence_files or [])
-        )
-        if not has_image:
-            errors.append(EVIDENCE_REQUIREMENTS[complaint_type] + ".")
-
-    return errors
-
-
-def build_customer_complaint(
-    claimant_role,
-    tracking_number,
-    complaint_type,
-    customer_email,
-    additional_information,
-    evidence_files,
-):
-    """Create the normalized, session-only complaint contract."""
-    reported_at = datetime.now(timezone.utc)
-    case_reference = f"CASE-{reported_at:%Y%m%d}-{uuid4().hex[:10].upper()}"
-    evidence = []
-    for evidence_file in evidence_files or []:
-        file_data = evidence_file.getvalue()
-        evidence.append(
-            {
-                "file_name": Path(evidence_file.name).name,
-                "content_type": evidence_file.type,
-                "size_bytes": len(file_data),
-                "data": file_data,
-            }
-        )
-
-    return {
-        "case_reference": case_reference,
-        "reported_at": reported_at.isoformat(),
-        "status": "submitted",
-        "claimant_role": claimant_role.strip().lower(),
-        "tracking_number": tracking_number.strip(),
-        "complaint_type": complaint_type,
-        "customer_email": customer_email.strip().lower(),
-        "additional_information": additional_information.strip(),
-        "evidence": evidence,
-        "downstream_processing_status": "not_connected",
-    }
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    record_processing_event(
+        case_reference=case_reference,
+        evidence_id=evidence_id,
+        stage=stage,
+        duration_ms=duration_ms,
+        status="completed",
+    )
+    return result
 
 
 def process_customer_evidence(complaint):
-    """Persist originals, then route images and documents to separate pipelines."""
+    """Store images for people and route text documents to the RAG index."""
     for item in complaint["evidence"]:
         file_data = item.pop("data")
         extension = Path(item["file_name"]).suffix.lower().lstrip(".")
         item["evidence_kind"] = "image" if extension in IMAGE_EVIDENCE_TYPES else "document"
-        item["s3_object_key"] = upload_evidence_to_s3(
-            file_data, item["file_name"], complaint["case_reference"]
+        item["s3_object_key"] = run_customer_stage(
+            complaint["case_reference"],
+            "s3_upload",
+            upload_evidence_to_s3,
+            file_data,
+            item["file_name"],
+            complaint["case_reference"],
+            evidence_id=item["evidence_id"],
         )
         item["upload_status"] = "stored_private"
 
         if item["evidence_kind"] == "image":
-            item["vision_observations"] = inspect_evidence_image_bytes(
-                file_data,
-                item["content_type"] or f"image/{extension}",
-                file_name=item["file_name"],
-            )
-            item["processing_status"] = "vision_inspected"
+            item["processing_status"] = "ready_for_human_review"
             update_customer_evidence(item)
             continue
 
-        result = process_uploaded_bytes(file_data, item["file_name"])
+        result = run_customer_stage(
+            complaint["case_reference"],
+            "document_extraction",
+            process_uploaded_bytes,
+            file_data,
+            item["file_name"],
+            evidence_id=item["evidence_id"],
+        )
         extracted_text = result["text"]
         metadata = result["metadata"]
-        chunks = chunk_text(extracted_text)
+        chunks = run_customer_stage(
+            complaint["case_reference"],
+            "document_chunking",
+            chunk_text,
+            extracted_text,
+            evidence_id=item["evidence_id"],
+        )
         if not chunks:
             raise RuntimeError("The evidence document produced no searchable text.")
         document_hash = hashlib.sha256(file_data).hexdigest()
-        document_id = upsert_document(
-            document_hash=document_hash,
-            original_file_name=item["file_name"],
-            s3_object_key=item["s3_object_key"],
-            content_type=item["content_type"],
-            size_bytes=item["size_bytes"],
-            document_kind=metadata.get("document_kind"),
-            extraction_method=metadata.get("extraction_method"),
-            used_vision=metadata.get("used_vision", False),
-            page_count=metadata.get("page_count"),
-            extracted_word_count=metadata.get("extracted_word_count"),
-            extracted_character_count=metadata.get("extracted_character_count"),
-            extracted_text=extracted_text,
-            processing_status="processed",
+        document_id = run_customer_stage(
+            complaint["case_reference"],
+            "document_persistence",
+            upsert_document,
+            evidence_id=item["evidence_id"],
+            function_kwargs={
+                "document_hash": document_hash,
+                "original_file_name": item["file_name"],
+                "s3_object_key": item["s3_object_key"],
+                "content_type": item["content_type"],
+                "size_bytes": item["size_bytes"],
+                "document_kind": metadata.get("document_kind"),
+                "extraction_method": metadata.get("extraction_method"),
+                "used_vision": metadata.get("used_vision", False),
+                "page_count": metadata.get("page_count"),
+                "extracted_word_count": metadata.get("extracted_word_count"),
+                "extracted_character_count": metadata.get(
+                    "extracted_character_count"
+                ),
+                "extracted_text": extracted_text,
+                "processing_status": "processed",
+            },
         )
-        embeddings = embed_chunks(chunks)
-        save_document_chunks(
-            document_id=document_id,
-            chunks=chunks,
-            embeddings=embeddings,
-            embedding_model="sentence-transformers/all-mpnet-base-v2",
+        embeddings = run_customer_stage(
+            complaint["case_reference"],
+            "embedding",
+            embed_chunks,
+            chunks,
+            evidence_id=item["evidence_id"],
+        )
+        run_customer_stage(
+            complaint["case_reference"],
+            "vector_persistence",
+            save_document_chunks,
+            evidence_id=item["evidence_id"],
+            function_kwargs={
+                "document_id": document_id,
+                "chunks": chunks,
+                "embeddings": embeddings,
+                "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+            },
         )
         item.update({
             "document_id": document_id,
@@ -201,6 +205,80 @@ def process_customer_evidence(complaint):
         complaint["case_reference"], "evidence_processed"
     )
     return complaint
+
+
+def retrieve_customer_evidence_context(complaint):
+    """Retrieve focused document passages for grounded case preparation."""
+    searchable_items = [
+        item for item in complaint["evidence"] if item.get("document_id")
+    ]
+    if not searchable_items:
+        return []
+    queries = [
+        "shipment tracking number carrier country delivery date",
+        "invoice purchase price declared value proof of value",
+        "description of parcel damage loss delay or non-delivery",
+    ]
+    query_embeddings = embed_chunks(queries)
+    excerpts = []
+    for item in searchable_items:
+        document_id = item["document_id"]
+        seen_chunks = set()
+        for query, query_embedding in zip(queries, query_embeddings):
+            rows = search_document_chunks(
+                document_id=document_id,
+                query_embedding=query_embedding,
+                limit=2,
+            )
+            for chunk_index, chunk_text_value, similarity in rows:
+                if chunk_index in seen_chunks:
+                    continue
+                seen_chunks.add(chunk_index)
+                excerpts.append(
+                    f"[Evidence: {item['file_name']}; chunk {chunk_index}; "
+                    f"similarity {float(similarity):.3f}]\n{chunk_text_value}"
+                )
+    return excerpts
+
+
+def prepare_customer_case_analysis(complaint):
+    """Prepare a grounded case using structured intake and retrieved evidence."""
+    evidence_labels = []
+    for item in complaint["evidence"]:
+        if item.get("evidence_kind") == "image":
+            evidence_labels.append(
+                f"Customer-uploaded photograph: {item['file_name']} "
+                "(stored for human review; not automatically interpreted)"
+            )
+        else:
+            evidence_labels.append(f"Searchable document: {item['file_name']}")
+
+    retrieved_excerpts = retrieve_customer_evidence_context(complaint)
+    source_text = "\n".join([
+        "Customer logistics complaint",
+        f"Incident ID: {complaint['case_reference']}",
+        f"Tracking number: {complaint['tracking_number']}",
+        f"Carrier: {complaint['carrier']}",
+        f"Country: {complaint['country']}",
+        f"Delivery date: {complaint['delivery_date'] or 'Not applicable or unknown'}",
+        f"Declared value: {complaint['declared_value'] or 'Not supplied'}",
+        f"Incident type: {complaint['complaint_type']}",
+        f"Reported date: {complaint['reported_at'][:10]}",
+        f"Claimant role: {complaint['claimant_role']}",
+        f"Customer statement: {complaint['additional_information'] or 'Not supplied'}",
+        "Evidence available:",
+        *(f"- {label}" for label in evidence_labels),
+        "Retrieved evidence passages:",
+        *(retrieved_excerpts or ["- No searchable document passages were available."]),
+    ])
+    analysis = prepare_incident_case(
+        source_text,
+        source_file=f"{complaint['case_reference']}-customer-submission",
+        source_document_hash=hashlib.sha256(
+            complaint["case_reference"].encode("utf-8")
+        ).hexdigest(),
+    )
+    return analysis.to_dict()
 
 
 def clear_document_session():
@@ -388,6 +466,14 @@ with st.form("customer_complaint_form", clear_on_submit=False):
         "Tracking number",
         placeholder="Enter your parcel tracking number",
     )
+    carrier = st.text_input(
+        "Delivery carrier",
+        placeholder="For example, DHL, UPS, or the project evaluation carrier",
+    )
+    country = st.text_input(
+        "Destination country",
+        placeholder="For example, Germany",
+    )
     incident_type = st.selectbox(
         "What happened?",
         options=list(COMPLAINT_TYPE_LABELS),
@@ -399,13 +485,23 @@ with st.form("customer_complaint_form", clear_on_submit=False):
         "Email",
         placeholder="Enter the email address we should use for this case",
     )
+    delivery_date = st.date_input(
+        "Delivery date (when applicable)",
+        value=None,
+        help="Required for damaged, late, and missing-item complaints.",
+    )
+    declared_value = st.text_input(
+        "Declared or purchase value (optional)",
+        placeholder="For example, EUR 899.00",
+    )
     evidence_files = st.file_uploader(
         "Supporting evidence",
         type=SUPPORTED_EVIDENCE_TYPES,
         accept_multiple_files=True,
         help=(
-            "Upload relevant photos or documents. Damage and missing-item "
-            "complaints require at least one JPG or PNG photo."
+            "Upload up to 10 files (50 MB combined). Images: 10 MB each. "
+            "Documents: 20 MB each. Damage and missing-item complaints require "
+            "at least one JPG or PNG photo."
         ),
         key="customer_evidence_files",
     )
@@ -423,7 +519,13 @@ with st.form("customer_complaint_form", clear_on_submit=False):
 
 if complaint_submitted:
     validation_errors = validate_customer_submission(
-        tracking_number, incident_type, customer_email, evidence_files
+        tracking_number,
+        carrier,
+        country,
+        delivery_date,
+        incident_type,
+        customer_email,
+        evidence_files,
     )
     if validation_errors:
         for validation_error in validation_errors:
@@ -432,6 +534,10 @@ if complaint_submitted:
         complaint = build_customer_complaint(
             claimant_role,
             tracking_number,
+            carrier,
+            country,
+            delivery_date,
+            declared_value,
             incident_type,
             customer_email,
             additional_information,
@@ -439,13 +545,83 @@ if complaint_submitted:
         )
         try:
             with st.spinner("Securely storing and preparing your evidence..."):
+                submission_processing_started = time.perf_counter()
+                case_creation_started = time.perf_counter()
                 create_customer_case(complaint)
+                record_processing_event(
+                    case_reference=complaint["case_reference"],
+                    stage="case_creation",
+                    duration_ms=round(
+                        (time.perf_counter() - case_creation_started) * 1000, 2
+                    ),
+                    status="completed",
+                )
                 complaint["downstream_processing_status"] = "processing_evidence"
                 update_customer_case_status(
                     complaint["case_reference"], "processing_evidence"
                 )
                 st.session_state.customer_complaint = process_customer_evidence(
                     complaint
+                )
+                try:
+                    analysis = run_customer_stage(
+                        complaint["case_reference"],
+                        "grounded_case_analysis",
+                        prepare_customer_case_analysis,
+                        complaint,
+                    )
+                    complaint["case_analysis"] = analysis
+                    complaint["analysis_status"] = "completed"
+                    save_customer_case_analysis(
+                        complaint["case_reference"], analysis, "completed"
+                    )
+                except (DocumentAgentError, NonIncidentDocumentError):
+                    complaint["analysis_status"] = "needs_human_preparation"
+                    save_customer_case_analysis(
+                        complaint["case_reference"],
+                        None,
+                        "needs_human_preparation",
+                    )
+                if customer_case_handoff_enabled():
+                    try:
+                        persisted_case = get_customer_case_for_handoff(
+                            complaint["case_reference"]
+                        )
+                        st.session_state.customer_case_handoff_receipt = run_customer_stage(
+                            complaint["case_reference"],
+                            "make_handoff",
+                            send_customer_case_to_make,
+                            persisted_case,
+                            function_kwargs={
+                                "download_url_factory": create_private_evidence_download_url,
+                            },
+                        )
+                        complaint["downstream_processing_status"] = "handoff_accepted"
+                        update_customer_case_status(
+                            complaint["case_reference"], "handoff_accepted"
+                        )
+                    except Exception:
+                        # Submission and evidence storage remain successful even
+                        # when the operational handoff needs an internal retry.
+                        complaint["downstream_processing_status"] = "handoff_failed"
+                        update_customer_case_status(
+                            complaint["case_reference"],
+                            "handoff_failed",
+                            "The Make handoff did not complete.",
+                        )
+                else:
+                    complaint["downstream_processing_status"] = "ready_for_handoff"
+                    update_customer_case_status(
+                        complaint["case_reference"], "ready_for_handoff"
+                    )
+                record_processing_event(
+                    case_reference=complaint["case_reference"],
+                    stage="submission_to_ready",
+                    duration_ms=round(
+                        (time.perf_counter() - submission_processing_started) * 1000,
+                        2,
+                    ),
+                    status="completed",
                 )
         except Exception as exc:
             # Do not retain uploaded file bodies in Streamlit memory after the
@@ -474,7 +650,12 @@ if (
     st.session_state.get("customer_complaint", {}).get(
         "downstream_processing_status"
     )
-    == "evidence_processed"
+    in {
+        "evidence_processed",
+        "ready_for_handoff",
+        "handoff_accepted",
+        "handoff_failed",
+    }
 ):
     submitted_complaint = st.session_state.customer_complaint
     st.success("Your complaint has been submitted successfully.")

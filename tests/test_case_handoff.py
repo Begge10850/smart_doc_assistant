@@ -4,7 +4,9 @@ from unittest.mock import patch
 
 from case_handoff import (
     CaseHandoffError,
+    build_customer_case_handoff_event,
     build_handoff_event,
+    send_customer_case_to_make,
     send_case_to_make,
 )
 from incident_case import IncidentCase
@@ -40,6 +42,78 @@ def make_case():
 
 
 class CaseHandoffTests(unittest.TestCase):
+    def test_customer_handoff_attaches_images_without_ai_interpretation(self):
+        customer_case = {
+            "case_reference": "CASE-20260826-ABC123",
+            "reported_at": "2026-08-26T10:00:00+00:00",
+            "status": "submitted",
+            "claimant_role": "recipient",
+            "tracking_number": "TRACK-123",
+            "complaint_type": "parcel_damage",
+            "customer_email": "customer@example.com",
+            "additional_information": "Screen appears broken.",
+            "downstream_processing_status": "evidence_processed",
+            "evidence": [{
+                "id": 7,
+                "original_file_name": "damage.jpg",
+                "content_type": "image/jpeg",
+                "size_bytes": 1234,
+                "evidence_kind": "image",
+                "processing_status": "ready_for_human_review",
+                "document_id": None,
+                "s3_object_key": "customer-cases/CASE-20260826-ABC123/evidence/damage.jpg",
+            }],
+        }
+        event = build_customer_case_handoff_event(
+            customer_case,
+            download_url_factory=lambda _key: "https://signed.example/evidence",
+            sent_at="2026-08-26T11:00:00Z",
+        )
+
+        self.assertEqual(event["event_version"], "1.0")
+        self.assertEqual(event["case"]["final_decision_owner"], "human_reviewer")
+        self.assertNotIn("ai_observations", event)
+        self.assertNotIn("s3_object_key", event["evidence"][0])
+        self.assertEqual(
+            event["evidence"][0]["attachment_download_url"],
+            "https://signed.example/evidence",
+        )
+
+    def test_customer_handoff_uses_stable_idempotency_key(self):
+        customer_case = {
+            "case_reference": "CASE-20260826-ABC123",
+            "reported_at": "2026-08-26T10:00:00+00:00",
+            "status": "submitted",
+            "claimant_role": "recipient",
+            "tracking_number": "TRACK-123",
+            "complaint_type": "late_delivery",
+            "customer_email": "customer@example.com",
+            "additional_information": "Late.",
+            "downstream_processing_status": "evidence_processed",
+            "evidence": [],
+        }
+        captured = {}
+
+        def fake_post(_url, **kwargs):
+            captured.update(kwargs)
+            return 200, "{}"
+
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_customer_case_to_make(
+                customer_case,
+                download_url_factory=lambda _key: "https://signed.example/evidence",
+                post_request=fake_post,
+            )
+
+        self.assertEqual(receipt["status"], "accepted")
+        self.assertEqual(
+            captured["headers"]["Idempotency-Key"],
+            "customer-handoff-CASE-20260826-ABC123",
+        )
+
     def test_processed_event_contains_versioned_case_payload(self):
         event = build_handoff_event(
             make_case(),

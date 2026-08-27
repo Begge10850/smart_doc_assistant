@@ -19,6 +19,7 @@ sys.modules["qa_engine"] = fake_qa_engine
 
 fake_database = types.ModuleType("database")
 fake_database.search_document_chunks = lambda **_kwargs: []
+fake_database.find_carrier_policies = lambda **_kwargs: []
 sys.modules["database"] = fake_database
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

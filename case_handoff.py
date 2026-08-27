@@ -13,6 +13,8 @@ from incident_case import IncidentCase
 HANDOFF_EVENT_TYPE = "saidia.case.processed"
 HANDOFF_EVENT_VERSION = "2.0"
 HANDOFF_TIMEOUT_SECONDS = 15
+CUSTOMER_HANDOFF_EVENT_TYPE = "saidia.customer_case.ready_for_human_review"
+CUSTOMER_HANDOFF_EVENT_VERSION = "1.0"
 
 
 class CaseHandoffError(RuntimeError):
@@ -56,6 +58,19 @@ def _read_make_webhook_url() -> str:
     if parsed_url.scheme != "https" or not parsed_url.netloc:
         raise CaseHandoffError("The Make webhook must be a valid HTTPS URL.")
     return webhook_url
+
+
+def customer_case_handoff_enabled() -> bool:
+    """Require an explicit switch before sending the new customer event shape."""
+    configured = os.getenv("ENABLE_CUSTOMER_CASE_HANDOFF", "false")
+    try:
+        import streamlit as st
+
+        make_secrets = st.secrets.get("make", {})
+        configured = make_secrets.get("ENABLE_CUSTOMER_CASE_HANDOFF", configured)
+    except Exception:
+        pass
+    return str(configured).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def build_handoff_event(
@@ -132,6 +147,87 @@ def send_case_to_make(
         "make_response": response_text[:500],
         "status": "accepted",
     }
+    if jira_result:
+        receipt["jira_result"] = jira_result
+    return receipt
+
+
+def build_customer_case_handoff_event(customer_case, *, download_url_factory, sent_at=None):
+    """Build a human-review event from a persisted customer case."""
+    if customer_case.get("downstream_processing_status") not in {
+        "evidence_processed", "ready_for_handoff"
+    }:
+        raise CaseHandoffError("The customer case evidence is not ready for handoff.")
+
+    event_time = sent_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    evidence_items = []
+    for evidence in customer_case.get("evidence", []):
+        evidence_items.append({
+            "evidence_id": evidence["id"],
+            "file_name": evidence["original_file_name"],
+            "content_type": evidence.get("content_type"),
+            "size_bytes": evidence["size_bytes"],
+            "evidence_kind": evidence.get("evidence_kind"),
+            "processing_status": evidence.get("processing_status"),
+            "document_id": evidence.get("document_id"),
+            "attachment_download_url": download_url_factory(evidence["s3_object_key"]),
+            "attachment_url_expires_in_seconds": 900,
+        })
+
+    case_fields = {
+        field: customer_case.get(field)
+        for field in (
+            "case_reference", "reported_at", "status", "claimant_role",
+            "tracking_number", "carrier", "country", "delivery_date",
+            "declared_value", "complaint_type", "customer_email",
+            "additional_information",
+        )
+    }
+    case_fields["final_decision_owner"] = "human_reviewer"
+    case_fields["analysis_status"] = customer_case.get("analysis_status")
+    case_fields["grounded_case_analysis"] = customer_case.get("case_analysis")
+    return {
+        "event_type": CUSTOMER_HANDOFF_EVENT_TYPE,
+        "event_version": CUSTOMER_HANDOFF_EVENT_VERSION,
+        "event_id": f"customer-handoff-{customer_case['case_reference']}",
+        "sent_at": event_time,
+        "case": case_fields,
+        "evidence": evidence_items,
+    }
+
+
+def send_customer_case_to_make(customer_case, *, download_url_factory, post_request=_post_json):
+    """Send one persisted customer case to Make for human Jira review."""
+    event = build_customer_case_handoff_event(
+        customer_case, download_url_factory=download_url_factory
+    )
+    webhook_url = _read_make_webhook_url()
+    try:
+        response_status, response_text = post_request(
+            webhook_url,
+            event=event,
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": event["event_id"],
+            },
+            timeout=HANDOFF_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise CaseHandoffError(
+            "The customer case could not be handed to Make. Check the scenario history before retrying."
+        ) from exc
+    if not 200 <= response_status < 300:
+        raise CaseHandoffError(
+            f"Make rejected the customer case with HTTP status {response_status}."
+        )
+    receipt = {
+        "case_reference": customer_case["case_reference"],
+        "event_id": event["event_id"],
+        "sent_at": event["sent_at"],
+        "http_status": response_status,
+        "status": "accepted",
+    }
+    jira_result = _parse_jira_result(str(response_text or "").strip())
     if jira_result:
         receipt["jira_result"] = jira_result
     return receipt

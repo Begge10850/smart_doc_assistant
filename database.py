@@ -45,11 +45,13 @@ def create_customer_case(complaint):
     case_query = """
         insert into customer_cases (
             case_reference, reported_at, status, claimant_role, tracking_number,
+            carrier, country, delivery_date, declared_value,
             complaint_type, customer_email, additional_information,
             downstream_processing_status
         ) values (
             %(case_reference)s, %(reported_at)s, %(status)s, %(claimant_role)s,
-            %(tracking_number)s, %(complaint_type)s, %(customer_email)s,
+            %(tracking_number)s, %(carrier)s, %(country)s, %(delivery_date)s,
+            %(declared_value)s, %(complaint_type)s, %(customer_email)s,
             %(additional_information)s, %(downstream_processing_status)s
         )
         returning id;
@@ -88,12 +90,68 @@ def update_customer_case_status(case_reference, status, processing_error=None):
         update customer_cases
         set downstream_processing_status = %s,
             processing_error = %s,
+            ready_for_review_at = case
+                when %s in ('ready_for_handoff', 'handoff_accepted')
+                then coalesce(ready_for_review_at, now())
+                else ready_for_review_at
+            end,
+            handoff_accepted_at = case
+                when %s = 'handoff_accepted' then coalesce(handoff_accepted_at, now())
+                else handoff_accepted_at
+            end,
             updated_at = now()
         where case_reference = %s;
     """
     with psycopg.connect(get_database_url()) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(query, (status, processing_error, case_reference))
+            cursor.execute(
+                query,
+                (status, processing_error, status, status, case_reference),
+            )
+        connection.commit()
+
+
+def record_processing_event(
+    *, case_reference, stage, duration_ms, status,
+    evidence_id=None, error_category=None
+):
+    """Persist one privacy-safe technical performance measurement."""
+    query = """
+        insert into case_processing_events (
+            customer_case_id, evidence_id, stage, duration_ms, status,
+            error_category
+        )
+        select id, %s, %s, %s, %s, %s
+        from customer_cases
+        where case_reference = %s;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                (
+                    evidence_id, stage, duration_ms, status,
+                    error_category, case_reference,
+                ),
+            )
+        connection.commit()
+
+
+def save_customer_case_analysis(case_reference, analysis, status):
+    """Store the grounded preparation result separately from source evidence."""
+    query = """
+        update customer_cases
+        set analysis_status = %s,
+            case_analysis = %s,
+            updated_at = now()
+        where case_reference = %s;
+    """
+    analysis_json = (
+        psycopg.types.json.Jsonb(analysis) if analysis is not None else None
+    )
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (status, analysis_json, case_reference))
         connection.commit()
 
 
@@ -127,6 +185,48 @@ def update_customer_evidence(evidence):
         with connection.cursor() as cursor:
             cursor.execute(query, params)
         connection.commit()
+
+
+def get_customer_case_for_handoff(case_reference):
+    """Load one persisted case and its successfully prepared evidence."""
+    case_query = """
+        select case_reference, reported_at, status, claimant_role,
+               tracking_number, carrier, country, delivery_date, declared_value,
+               complaint_type, customer_email,
+               additional_information, downstream_processing_status,
+               analysis_status, case_analysis
+        from customer_cases
+        where case_reference = %s;
+    """
+    evidence_query = """
+        select id, original_file_name, content_type, size_bytes, evidence_kind,
+               s3_object_key, upload_status, processing_status, document_id,
+               vision_observations
+        from customer_case_evidence
+        where customer_case_id = (
+            select id from customer_cases where case_reference = %s
+        )
+        order by id;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(case_query, (case_reference,))
+            case_row = cursor.fetchone()
+            if case_row is None:
+                raise RuntimeError("The customer case could not be found.")
+            case_columns = [description.name for description in cursor.description]
+            customer_case = dict(zip(case_columns, case_row))
+
+            cursor.execute(evidence_query, (case_reference,))
+            evidence_columns = [description.name for description in cursor.description]
+            customer_case["evidence"] = [
+                dict(zip(evidence_columns, row)) for row in cursor.fetchall()
+            ]
+
+    customer_case["reported_at"] = customer_case["reported_at"].isoformat()
+    if customer_case.get("delivery_date"):
+        customer_case["delivery_date"] = customer_case["delivery_date"].isoformat()
+    return customer_case
 
 def upsert_document(
     *,
