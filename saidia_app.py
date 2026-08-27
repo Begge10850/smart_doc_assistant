@@ -77,6 +77,32 @@ DOCUMENT_STATE_KEYS = [
     "processing_timings",
 ]
 
+CUSTOMER_FORM_WIDGET_KEYS = [
+    "customer_claimant_role",
+    "customer_tracking_number",
+    "customer_country",
+    "customer_incident_type",
+    "customer_email",
+    "customer_delivery_date",
+    "customer_declared_value",
+    "customer_evidence_files",
+    "customer_additional_information",
+]
+
+
+def reset_customer_form_state():
+    """Clear every customer widget, including the evidence uploader."""
+    for key in CUSTOMER_FORM_WIDGET_KEYS:
+        st.session_state.pop(key, None)
+
+
+def start_customer_report():
+    """Open a fresh complaint form."""
+    reset_customer_form_state()
+    st.session_state.pop("customer_complaint", None)
+    st.session_state.pop("customer_case_handoff_receipt", None)
+    st.session_state.customer_intake_view = "form"
+
 def run_customer_stage(
     case_reference, stage, function, *args, evidence_id=None, function_kwargs=None
 ):
@@ -456,72 +482,124 @@ st.markdown(
     "case to be reviewed."
 )
 
-st.subheader("Report a Delivery Problem")
-st.caption(
-    f"Fictional evaluation environment for {CONFIGURED_CARRIER}. "
-    "Policies are project examples, not real carrier terms."
+if st.session_state.pop("reset_customer_form_on_rerun", False):
+    reset_customer_form_state()
+
+customer_intake_view = st.session_state.setdefault(
+    "customer_intake_view", "landing"
 )
 
-with st.form("customer_complaint_form", clear_on_submit=False):
-    claimant_role = st.radio(
-        "Are you the sender or recipient?",
-        options=["Recipient", "Sender"],
-        horizontal=True,
+if customer_intake_view == "landing":
+    st.subheader("Report a Delivery Problem")
+    st.markdown(
+        "Tell us what happened to your parcel. You will receive a case "
+        "reference after your report has been received."
     )
-    tracking_number = st.text_input(
-        "Tracking number",
-        placeholder="Enter your parcel tracking number",
-    )
-    country = st.selectbox(
-        "Destination country",
-        options=SUPPORTED_COUNTRIES,
-        index=None,
-        placeholder="Select a country",
-    )
-    incident_type = st.selectbox(
-        "What happened?",
-        options=list(COMPLAINT_TYPE_LABELS),
-        index=None,
-        placeholder="Select a problem",
-        format_func=lambda value: COMPLAINT_TYPE_LABELS[value],
-    )
-    customer_email = st.text_input(
-        "Email",
-        placeholder="Enter the email address we should use for this case",
-    )
-    delivery_date = st.date_input(
-        "Delivery or expected delivery date",
-        value=None,
-        help="Use the expected delivery date when the parcel was never delivered.",
-    )
-    declared_value = st.text_input(
-        "Declared or purchase value (optional)",
-        placeholder="For example, EUR 899.00",
-    )
-    evidence_files = st.file_uploader(
-        "Supporting evidence",
-        type=SUPPORTED_EVIDENCE_TYPES,
-        accept_multiple_files=True,
-        help=(
-            "Upload up to 10 files (50 MB combined). Images: 10 MB each. "
-            "Documents: 20 MB each. Damage and missing-item complaints require "
-            "at least one JPG or PNG photo."
-        ),
-        key="customer_evidence_files",
-    )
-    additional_information = st.text_area(
-        "Additional information",
-        placeholder=(
-            "Describe what happened and include any details that may help us "
-            "review the delivery problem"
-        ),
-        height=160,
-    )
-    complaint_submitted = st.form_submit_button(
-        "Submit complaint", use_container_width=True
+    st.button(
+        "Report a delivery problem",
+        type="primary",
+        use_container_width=True,
+        on_click=start_customer_report,
     )
 
-if complaint_submitted:
+elif customer_intake_view == "form":
+    st.subheader("Report a Delivery Problem")
+    st.caption(
+        f"Fictional evaluation environment for {CONFIGURED_CARRIER}. "
+        "Policies are project examples, not real carrier terms."
+    )
+
+    with st.form("customer_complaint_form", clear_on_submit=False):
+        claimant_role = st.radio(
+            "Are you the sender or recipient?",
+            options=["Recipient", "Sender"],
+            horizontal=True,
+            key="customer_claimant_role",
+        )
+        tracking_number = st.text_input(
+            "Tracking number",
+            placeholder="Enter your parcel tracking number",
+            key="customer_tracking_number",
+        )
+        country = st.selectbox(
+            "Destination country",
+            options=SUPPORTED_COUNTRIES,
+            index=None,
+            placeholder="Select a country",
+            key="customer_country",
+        )
+        incident_type = st.selectbox(
+            "What happened?",
+            options=list(COMPLAINT_TYPE_LABELS),
+            index=None,
+            placeholder="Select a problem",
+            format_func=lambda value: COMPLAINT_TYPE_LABELS[value],
+            key="customer_incident_type",
+        )
+        customer_email = st.text_input(
+            "Email",
+            placeholder="Enter the email address we should use for this case",
+            key="customer_email",
+        )
+        delivery_date = st.date_input(
+            "Delivery or expected delivery date",
+            value=None,
+            help="Use the expected delivery date when the parcel was never delivered.",
+            key="customer_delivery_date",
+        )
+        declared_value = st.text_input(
+            "Declared or purchase value (optional)",
+            placeholder="For example, EUR 899.00",
+            key="customer_declared_value",
+        )
+        evidence_files = st.file_uploader(
+            "Supporting evidence",
+            type=SUPPORTED_EVIDENCE_TYPES,
+            accept_multiple_files=True,
+            help=(
+                "Upload up to 10 files (50 MB combined). Images: 10 MB each. "
+                "Documents: 20 MB each. Damage and missing-item complaints require "
+                "at least one JPG or PNG photo."
+            ),
+            key="customer_evidence_files",
+        )
+        additional_information = st.text_area(
+            "Additional information",
+            placeholder=(
+                "Describe what happened and include any details that may help us "
+                "review the delivery problem"
+            ),
+            height=160,
+            key="customer_additional_information",
+        )
+        complaint_submitted = st.form_submit_button(
+            "Submit complaint", use_container_width=True
+        )
+
+else:
+    submitted_complaint = st.session_state.get("customer_complaint")
+    if submitted_complaint:
+        st.success("Case reported successfully")
+        st.markdown(
+            "We have received your delivery problem. Your case reference is "
+            f"**`{submitted_complaint['case_reference']}`**. Keep this reference "
+            "for future correspondence."
+        )
+        st.caption(
+            "Your original evidence is stored securely and is available for "
+            "human review."
+        )
+        st.button(
+            "Report another problem",
+            type="primary",
+            use_container_width=True,
+            on_click=start_customer_report,
+        )
+    else:
+        st.session_state.customer_intake_view = "landing"
+        st.rerun()
+
+if customer_intake_view == "form" and complaint_submitted:
     validation_errors = validate_customer_submission(
         tracking_number,
         country,
@@ -546,50 +624,49 @@ if complaint_submitted:
             evidence_files,
         )
         try:
-            with st.spinner("Securely storing and preparing your evidence..."):
-                submission_processing_started = time.perf_counter()
-                case_creation_started = time.perf_counter()
-                create_customer_case(complaint)
-                record_processing_event(
+            submission_processing_started = time.perf_counter()
+            case_creation_started = time.perf_counter()
+            create_customer_case(complaint)
+            record_processing_event(
                     case_reference=complaint["case_reference"],
                     stage="case_creation",
                     duration_ms=round(
                         (time.perf_counter() - case_creation_started) * 1000, 2
                     ),
                     status="completed",
-                )
-                complaint["downstream_processing_status"] = "processing_evidence"
-                update_customer_case_status(
-                    complaint["case_reference"], "processing_evidence"
-                )
-                st.session_state.customer_complaint = process_customer_evidence(
-                    complaint
-                )
-                try:
-                    analysis = run_customer_stage(
+            )
+            complaint["downstream_processing_status"] = "processing_evidence"
+            update_customer_case_status(
+                complaint["case_reference"], "processing_evidence"
+            )
+            st.session_state.customer_complaint = process_customer_evidence(
+                complaint
+            )
+            try:
+                analysis = run_customer_stage(
                         complaint["case_reference"],
                         "grounded_case_analysis",
                         prepare_customer_case_analysis,
                         complaint,
+                )
+                complaint["case_analysis"] = analysis
+                complaint["analysis_status"] = "completed"
+                save_customer_case_analysis(
+                    complaint["case_reference"], analysis, "completed"
+                )
+            except (DocumentAgentError, NonIncidentDocumentError):
+                complaint["analysis_status"] = "needs_human_preparation"
+                save_customer_case_analysis(
+                    complaint["case_reference"],
+                    None,
+                    "needs_human_preparation",
+                )
+            if customer_case_handoff_enabled():
+                try:
+                    persisted_case = get_customer_case_for_handoff(
+                        complaint["case_reference"]
                     )
-                    complaint["case_analysis"] = analysis
-                    complaint["analysis_status"] = "completed"
-                    save_customer_case_analysis(
-                        complaint["case_reference"], analysis, "completed"
-                    )
-                except (DocumentAgentError, NonIncidentDocumentError):
-                    complaint["analysis_status"] = "needs_human_preparation"
-                    save_customer_case_analysis(
-                        complaint["case_reference"],
-                        None,
-                        "needs_human_preparation",
-                    )
-                if customer_case_handoff_enabled():
-                    try:
-                        persisted_case = get_customer_case_for_handoff(
-                            complaint["case_reference"]
-                        )
-                        st.session_state.customer_case_handoff_receipt = run_customer_stage(
+                    st.session_state.customer_case_handoff_receipt = run_customer_stage(
                             complaint["case_reference"],
                             "make_handoff",
                             send_customer_case_to_make,
@@ -597,34 +674,39 @@ if complaint_submitted:
                             function_kwargs={
                                 "download_url_factory": create_private_evidence_download_url,
                             },
-                        )
-                        complaint["downstream_processing_status"] = "handoff_accepted"
-                        update_customer_case_status(
-                            complaint["case_reference"], "handoff_accepted"
-                        )
-                    except Exception:
-                        # Submission and evidence storage remain successful even
-                        # when the operational handoff needs an internal retry.
-                        complaint["downstream_processing_status"] = "handoff_failed"
-                        update_customer_case_status(
-                            complaint["case_reference"],
-                            "handoff_failed",
-                            "The Make handoff did not complete.",
-                        )
-                else:
-                    complaint["downstream_processing_status"] = "ready_for_handoff"
-                    update_customer_case_status(
-                        complaint["case_reference"], "ready_for_handoff"
                     )
-                record_processing_event(
-                    case_reference=complaint["case_reference"],
-                    stage="submission_to_ready",
-                    duration_ms=round(
-                        (time.perf_counter() - submission_processing_started) * 1000,
-                        2,
-                    ),
-                    status="completed",
+                    complaint["downstream_processing_status"] = "handoff_accepted"
+                    update_customer_case_status(
+                        complaint["case_reference"], "handoff_accepted"
+                    )
+                except Exception:
+                    # Submission and evidence storage remain successful even
+                    # when the operational handoff needs an internal retry.
+                    complaint["downstream_processing_status"] = "handoff_failed"
+                    update_customer_case_status(
+                        complaint["case_reference"],
+                        "handoff_failed",
+                        "The Make handoff did not complete.",
+                    )
+            else:
+                complaint["downstream_processing_status"] = "ready_for_handoff"
+                update_customer_case_status(
+                    complaint["case_reference"], "ready_for_handoff"
                 )
+            record_processing_event(
+                case_reference=complaint["case_reference"],
+                stage="submission_to_ready",
+                duration_ms=round(
+                    (time.perf_counter() - submission_processing_started) * 1000,
+                    2,
+                ),
+                status="completed",
+            )
+            st.session_state.customer_complaint = complaint
+            # Widget state cannot be mutated after its widgets are instantiated
+            # in the same run. Clear it at the beginning of the success rerun.
+            st.session_state.reset_customer_form_on_rerun = True
+            st.session_state.customer_intake_view = "success"
         except Exception as exc:
             # Do not retain uploaded file bodies in Streamlit memory after the
             # persistence attempt, including when a later routing step fails.
@@ -647,29 +729,10 @@ if complaint_submitted:
                 "has been retained; please retry later."
             )
             st.markdown(f"Case reference: **`{complaint['case_reference']}`**")
-
-if (
-    st.session_state.get("customer_complaint", {}).get(
-        "downstream_processing_status"
-    )
-    in {
-        "evidence_processed",
-        "ready_for_handoff",
-        "handoff_accepted",
-        "handoff_failed",
-    }
-):
-    submitted_complaint = st.session_state.customer_complaint
-    st.success("Your complaint has been submitted successfully.")
-    st.markdown(
-        f"Your case reference is **`{submitted_complaint['case_reference']}`**. "
-        "Keep it for future correspondence."
-    )
-    st.caption(
-        "Your original evidence is stored securely and has been prepared for "
-        "human review."
-    )
-
+        else:
+            # Keep Streamlit's control-flow exception outside the processing
+            # error handler so a successful rerun cannot be shown as a failure.
+            st.rerun()
 
 # Keep the existing backend workflow intact but out of the customer experience
 # until customer submissions are connected to downstream processing.
