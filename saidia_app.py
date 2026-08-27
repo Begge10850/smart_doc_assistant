@@ -22,7 +22,9 @@ from case_handoff import (
 )
 from customer_intake import (
     COMPLAINT_TYPE_LABELS,
+    CONFIGURED_CARRIER,
     IMAGE_EVIDENCE_TYPES,
+    SUPPORTED_COUNTRIES,
     SUPPORTED_EVIDENCE_TYPES,
     build_customer_complaint,
     validate_customer_submission,
@@ -455,6 +457,10 @@ st.markdown(
 )
 
 st.subheader("Report a Delivery Problem")
+st.caption(
+    f"Fictional evaluation environment for {CONFIGURED_CARRIER}. "
+    "Policies are project examples, not real carrier terms."
+)
 
 with st.form("customer_complaint_form", clear_on_submit=False):
     claimant_role = st.radio(
@@ -466,13 +472,11 @@ with st.form("customer_complaint_form", clear_on_submit=False):
         "Tracking number",
         placeholder="Enter your parcel tracking number",
     )
-    carrier = st.text_input(
-        "Delivery carrier",
-        placeholder="For example, DHL, UPS, or the project evaluation carrier",
-    )
-    country = st.text_input(
+    country = st.selectbox(
         "Destination country",
-        placeholder="For example, Germany",
+        options=SUPPORTED_COUNTRIES,
+        index=None,
+        placeholder="Select a country",
     )
     incident_type = st.selectbox(
         "What happened?",
@@ -486,9 +490,9 @@ with st.form("customer_complaint_form", clear_on_submit=False):
         placeholder="Enter the email address we should use for this case",
     )
     delivery_date = st.date_input(
-        "Delivery date (when applicable)",
+        "Delivery or expected delivery date",
         value=None,
-        help="Required for damaged, late, and missing-item complaints.",
+        help="Use the expected delivery date when the parcel was never delivered.",
     )
     declared_value = st.text_input(
         "Declared or purchase value (optional)",
@@ -520,7 +524,6 @@ with st.form("customer_complaint_form", clear_on_submit=False):
 if complaint_submitted:
     validation_errors = validate_customer_submission(
         tracking_number,
-        carrier,
         country,
         delivery_date,
         incident_type,
@@ -534,7 +537,6 @@ if complaint_submitted:
         complaint = build_customer_complaint(
             claimant_role,
             tracking_number,
-            carrier,
             country,
             delivery_date,
             declared_value,

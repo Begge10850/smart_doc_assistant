@@ -1,8 +1,13 @@
 # 📄 Saidia Smart Document Assistant
 
-Saidia is an internal, GPT-powered document assistant for one organisation. It processes logistics incidents involving multiple external carriers, evaluates them against carrier-specific policies, and supports document-grounded questions in a private web app.
+Saidia is a GPT-powered complaint-preparation assistant for a fictional parcel carrier. It evaluates logistics incidents against carrier policies and supports document-grounded questions in a private web app.
 
-Saidia is intentionally single-organisation. Carriers are external parties associated with incidents and policies; they are not tenants, customer workspaces, or organisation boundaries.
+Saidia is intentionally a single-organisation, single-carrier MVP. The carrier is not a customer-selectable tenant or workspace.
+
+The customer-facing MVP is intentionally configured for the fictional
+`NorthStar Parcel` carrier in Germany and France. The underlying data model can
+support additional carriers, but they must not be exposed until their policies
+are added and evaluated.
 
 👉 **Try the live app here:** [Launch Saidia Smart Assistant](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
 
@@ -39,14 +44,16 @@ Saidia is intentionally single-organisation. Carriers are external parties assoc
 
 ## 💼 Product Scope
 
-Saidia supports one internal organisation handling:
+Saidia's MVP supports one internal organisation handling:
 
 - many logistics incidents;
-- many external carriers;
-- carrier-specific policies by country and incident type;
+- one configured fictional carrier, `NorthStar Parcel`;
+- policies by supported country and incident type;
 - structured case handoff for human operational review.
 
-Carrier names extracted from uploaded documents may vary, so the local evaluation-policy store keeps a small explicit alias mapping. This is input canonicalisation for external carrier names, not multi-tenant organisation modelling.
+The data model can be extended to additional carriers later, but the customer
+form does not expose a carrier selector while only NorthStar policies have been
+implemented and tested.
 
 ---
 
@@ -119,12 +126,18 @@ order to the same PostgreSQL database:
 ```text
 migrations/001_customer_cases.sql
 migrations/002_case_processing_metrics.sql
+migrations/003_northstar_complaint_policies.sql
 ```
 
 These create durable customer-case, evidence, grounded-analysis, lifecycle,
-and processing-metric records. Original file bodies remain in private S3;
+processing-metric, and fictional NorthStar policy records. Original file bodies remain in private S3;
 PostgreSQL stores case data, private S3 object keys, document relationships,
 processing status, grounded case analysis, and privacy-safe stage timings.
+
+After applying migration 003, run `python index_policies.py` once in the project
+environment. This chunks and embeds the five policy texts so semantic policy
+retrieval can find them. Structured policy matching remains deterministic by
+carrier, country, and complaint type.
 
 Example performance query:
 

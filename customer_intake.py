@@ -6,6 +6,8 @@ from uuid import uuid4
 
 SUPPORTED_EVIDENCE_TYPES = ["pdf", "txt", "docx", "jpg", "jpeg", "png"]
 IMAGE_EVIDENCE_TYPES = {"jpg", "jpeg", "png"}
+CONFIGURED_CARRIER = "NorthStar Parcel"
+SUPPORTED_COUNTRIES = ["Germany", "France"]
 MAX_EVIDENCE_FILES = 10
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 MAX_DOCUMENT_SIZE_BYTES = 20 * 1024 * 1024
@@ -25,22 +27,17 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def validate_customer_submission(
-    tracking_number, carrier, country, delivery_date, complaint_type,
+    tracking_number, country, delivery_date, complaint_type,
     customer_email, evidence_files
 ):
     """Return customer-facing validation errors without external side effects."""
     errors = []
     if not tracking_number.strip():
         errors.append("Enter your tracking number.")
-    if not carrier.strip():
-        errors.append("Enter the delivery carrier.")
-    if not country.strip():
+    if country not in SUPPORTED_COUNTRIES:
         errors.append("Enter the destination country.")
-    if (
-        complaint_type in {"parcel_damage", "late_delivery", "partial_loss"}
-        and delivery_date is None
-    ):
-        errors.append("Enter the delivery date for this complaint type.")
+    if delivery_date is None:
+        errors.append("Enter the delivery or expected delivery date.")
     if complaint_type not in COMPLAINT_TYPE_LABELS:
         errors.append("Select what happened to your delivery.")
     if not EMAIL_PATTERN.fullmatch(customer_email.strip().lower()):
@@ -81,7 +78,7 @@ def validate_customer_submission(
 
 
 def build_customer_complaint(
-    claimant_role, tracking_number, carrier, country, delivery_date,
+    claimant_role, tracking_number, country, delivery_date,
     declared_value, complaint_type, customer_email, additional_information,
     evidence_files
 ):
@@ -102,7 +99,7 @@ def build_customer_complaint(
         "status": "submitted",
         "claimant_role": claimant_role.strip().lower(),
         "tracking_number": tracking_number.strip(),
-        "carrier": carrier.strip(),
+        "carrier": CONFIGURED_CARRIER,
         "country": country.strip(),
         "delivery_date": delivery_date.isoformat() if delivery_date else None,
         "declared_value": declared_value.strip(),
