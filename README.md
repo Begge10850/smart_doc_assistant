@@ -127,12 +127,19 @@ order to the same PostgreSQL database:
 migrations/001_customer_cases.sql
 migrations/002_case_processing_metrics.sql
 migrations/003_northstar_complaint_policies.sql
+migrations/004_customer_case_schema_cleanup.sql
 ```
 
 These create durable customer-case, evidence, grounded-analysis, lifecycle,
 processing-metric, and fictional NorthStar policy records. Original file bodies remain in private S3;
 PostgreSQL stores case data, private S3 object keys, document relationships,
 processing status, grounded case analysis, and privacy-safe stage timings.
+
+Migration 004 makes `customer_cases` the single operational case source,
+connects `workflow_results` directly to it, removes the obsolete empty
+`incident_cases` table, and removes the unused customer-photo observation
+column. It refuses to drop `incident_cases` or detach unmatched workflow rows
+when legacy data is present, so that data must be reviewed first.
 
 After applying migration 003, run `python index_policies.py` once in the project
 environment. This chunks and embeds the five policy texts so semantic policy

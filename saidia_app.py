@@ -16,6 +16,8 @@ from agent_engine import (
 )
 from case_handoff import (
     CaseHandoffError,
+    CUSTOMER_HANDOFF_EVENT_TYPE,
+    CUSTOMER_HANDOFF_EVENT_VERSION,
     customer_case_handoff_enabled,
     send_case_to_make,
     send_customer_case_to_make,
@@ -44,6 +46,7 @@ from database import (
     record_processing_event,
     save_document_chunks,
     save_customer_case_analysis,
+    save_customer_workflow_result,
     search_document_chunks,
     update_customer_case_status,
     update_customer_evidence,
@@ -335,6 +338,7 @@ def complete_customer_case_processing(complaint):
         )
 
     if customer_case_handoff_enabled():
+        handoff_event_id = f"customer-handoff-{complaint['case_reference']}"
         try:
             persisted_case = get_customer_case_for_handoff(
                 complaint["case_reference"]
@@ -348,18 +352,44 @@ def complete_customer_case_processing(complaint):
                     "download_url_factory": create_private_evidence_download_url,
                 },
             )
-            complaint["downstream_processing_status"] = "handoff_accepted"
-            update_customer_case_status(
-                complaint["case_reference"], "handoff_accepted"
-            )
         except Exception:
             # The report remains safely received when an internal handoff fails.
+            try:
+                save_customer_workflow_result(
+                    case_reference=complaint["case_reference"],
+                    event_id=handoff_event_id,
+                    event_type=CUSTOMER_HANDOFF_EVENT_TYPE,
+                    event_version=CUSTOMER_HANDOFF_EVENT_VERSION,
+                    handoff_status="failed",
+                    error_message="The Make handoff did not complete.",
+                )
+            except Exception:
+                pass
             complaint["downstream_processing_status"] = "handoff_failed"
             update_customer_case_status(
                 complaint["case_reference"],
                 "handoff_failed",
                 "The Make handoff did not complete.",
             )
+        else:
+            handoff_receipt = st.session_state.customer_case_handoff_receipt
+            complaint["downstream_processing_status"] = "handoff_accepted"
+            update_customer_case_status(
+                complaint["case_reference"], "handoff_accepted"
+            )
+            try:
+                save_customer_workflow_result(
+                    case_reference=complaint["case_reference"],
+                    event_id=handoff_receipt["event_id"],
+                    event_type=CUSTOMER_HANDOFF_EVENT_TYPE,
+                    event_version=CUSTOMER_HANDOFF_EVENT_VERSION,
+                    handoff_status=handoff_receipt["status"],
+                    jira_result=handoff_receipt.get("jira_result"),
+                )
+            except Exception:
+                # A successful external handoff remains successful even if its
+                # local receipt needs an operational persistence retry.
+                pass
     else:
         complaint["downstream_processing_status"] = "ready_for_handoff"
         update_customer_case_status(

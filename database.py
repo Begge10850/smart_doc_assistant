@@ -156,7 +156,7 @@ def save_customer_case_analysis(case_reference, analysis, status):
 
 
 def update_customer_evidence(evidence):
-    """Persist storage, routing, and AI-observation fields for one evidence item."""
+    """Persist storage and routing fields for one evidence item."""
     query = """
         update customer_case_evidence
         set evidence_kind = %(evidence_kind)s,
@@ -164,7 +164,6 @@ def update_customer_evidence(evidence):
             upload_status = %(upload_status)s,
             processing_status = %(processing_status)s,
             document_id = %(document_id)s,
-            vision_observations = %(vision_observations)s,
             processing_error = %(processing_error)s,
             updated_at = now()
         where id = %(evidence_id)s;
@@ -176,9 +175,6 @@ def update_customer_evidence(evidence):
         "upload_status": evidence.get("upload_status", "pending"),
         "processing_status": evidence.get("processing_status", "pending"),
         "document_id": evidence.get("document_id"),
-        "vision_observations": psycopg.types.json.Jsonb(
-            evidence.get("vision_observations")
-        ) if evidence.get("vision_observations") is not None else None,
         "processing_error": evidence.get("processing_error"),
     }
     with psycopg.connect(get_database_url()) as connection:
@@ -200,8 +196,7 @@ def get_customer_case_for_handoff(case_reference):
     """
     evidence_query = """
         select id, original_file_name, content_type, size_bytes, evidence_kind,
-               s3_object_key, upload_status, processing_status, document_id,
-               vision_observations
+               s3_object_key, upload_status, processing_status, document_id
         from customer_case_evidence
         where customer_case_id = (
             select id from customer_cases where case_reference = %s
@@ -227,6 +222,54 @@ def get_customer_case_for_handoff(case_reference):
     if customer_case.get("delivery_date"):
         customer_case["delivery_date"] = customer_case["delivery_date"].isoformat()
     return customer_case
+
+
+def save_customer_workflow_result(
+    *, case_reference, event_id, event_type, event_version,
+    handoff_status, jira_result=None, error_message=None
+):
+    """Persist a customer case's Make/Jira handoff result idempotently."""
+    jira_result = jira_result or {}
+    query = """
+        insert into workflow_results (
+            customer_case_id, event_id, event_type, event_version,
+            handoff_status, jira_issue_key, jira_title, jira_routing,
+            jira_status, jira_url, error_message
+        )
+        select
+            id, %(event_id)s, %(event_type)s, %(event_version)s,
+            %(handoff_status)s, %(jira_issue_key)s, %(jira_title)s,
+            %(jira_routing)s, %(jira_status)s, %(jira_url)s,
+            %(error_message)s
+        from customer_cases
+        where case_reference = %(case_reference)s
+        on conflict (event_id) do update set
+            handoff_status = excluded.handoff_status,
+            jira_issue_key = excluded.jira_issue_key,
+            jira_title = excluded.jira_title,
+            jira_routing = excluded.jira_routing,
+            jira_status = excluded.jira_status,
+            jira_url = excluded.jira_url,
+            error_message = excluded.error_message,
+            updated_at = now();
+    """
+    params = {
+        "case_reference": case_reference,
+        "event_id": event_id,
+        "event_type": event_type,
+        "event_version": event_version,
+        "handoff_status": handoff_status,
+        "jira_issue_key": jira_result.get("issue_key"),
+        "jira_title": jira_result.get("title"),
+        "jira_routing": jira_result.get("routing"),
+        "jira_status": jira_result.get("status"),
+        "jira_url": jira_result.get("jira_url"),
+        "error_message": error_message,
+    }
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+        connection.commit()
 
 def upsert_document(
     *,
