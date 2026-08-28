@@ -4,7 +4,9 @@ import unittest
 from customer_intake import (
     CONFIGURED_CARRIER,
     MAX_IMAGE_SIZE_BYTES,
+    build_customer_case_update,
     build_customer_complaint,
+    validate_case_update,
     validate_customer_submission,
 )
 
@@ -48,6 +50,20 @@ class CustomerIntakeTests(unittest.TestCase):
         self.assertEqual(complaint["evidence"][0]["file_name"], "damage.jpg")
         self.assertEqual(complaint["delivery_date"], "2026-08-26")
         self.assertEqual(complaint["carrier"], CONFIGURED_CARRIER)
+
+    def test_case_update_requires_information_or_evidence(self):
+        errors = validate_case_update("CASE-1", "TRACK-1", "", [])
+        self.assertTrue(any("information" in error for error in errors))
+
+    def test_case_update_normalizes_reference_and_evidence(self):
+        case_update = build_customer_case_update(
+            " case-1 ", " TRACK-1 ", " New receipt ",
+            [FakeUpload("../receipt.jpg")],
+        )
+        self.assertEqual(case_update["case_reference"], "CASE-1")
+        self.assertEqual(case_update["tracking_number"], "TRACK-1")
+        self.assertEqual(case_update["evidence"][0]["file_name"], "receipt.jpg")
+        self.assertTrue(case_update["update_reference"].startswith("UPDATE-"))
 
 
 if __name__ == "__main__":

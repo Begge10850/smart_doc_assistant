@@ -15,6 +15,8 @@ HANDOFF_EVENT_VERSION = "2.0"
 HANDOFF_TIMEOUT_SECONDS = 15
 CUSTOMER_HANDOFF_EVENT_TYPE = "saidia.customer_case.ready_for_human_review"
 CUSTOMER_HANDOFF_EVENT_VERSION = "1.0"
+CUSTOMER_UPDATE_EVENT_TYPE = "saidia.customer_case.updated"
+CUSTOMER_UPDATE_EVENT_VERSION = "1.0"
 
 
 class CaseHandoffError(RuntimeError):
@@ -179,8 +181,7 @@ def build_customer_case_handoff_event(customer_case, *, download_url_factory, se
         for field in (
             "case_reference", "reported_at", "status", "claimant_role",
             "tracking_number", "carrier", "country", "delivery_date",
-            "declared_value", "complaint_type", "customer_email",
-            "additional_information",
+            "declared_value", "complaint_type", "additional_information",
         )
     }
     case_fields["final_decision_owner"] = "human_reviewer"
@@ -230,6 +231,94 @@ def send_customer_case_to_make(customer_case, *, download_url_factory, post_requ
     jira_result = _parse_jira_result(str(response_text or "").strip())
     if jira_result:
         receipt["jira_result"] = jira_result
+    return receipt
+
+
+def build_customer_case_update_event(
+    case_update, *, jira_result, download_url_factory, sent_at=None
+):
+    """Build an idempotent event that updates an existing Jira case."""
+    if not jira_result or not jira_result.get("issue_key"):
+        raise CaseHandoffError(
+            "The existing case does not yet have a Jira issue to update."
+        )
+    event_time = sent_at or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    evidence_items = []
+    for evidence in case_update.get("evidence", []):
+        evidence_items.append({
+            "evidence_id": evidence["evidence_id"],
+            "file_name": evidence["file_name"],
+            "content_type": evidence.get("content_type"),
+            "size_bytes": evidence["size_bytes"],
+            "evidence_kind": evidence.get("evidence_kind"),
+            "processing_status": evidence.get("processing_status"),
+            "document_id": evidence.get("document_id"),
+            "attachment_download_url": download_url_factory(
+                evidence["s3_object_key"]
+            ),
+            "attachment_url_expires_in_seconds": 900,
+        })
+    return {
+        "event_type": CUSTOMER_UPDATE_EVENT_TYPE,
+        "event_version": CUSTOMER_UPDATE_EVENT_VERSION,
+        "event_id": f"customer-update-{case_update['update_reference']}",
+        "sent_at": event_time,
+        "case_reference": case_update["case_reference"],
+        "update": {
+            "update_reference": case_update["update_reference"],
+            "additional_information": case_update.get(
+                "new_additional_information",
+                case_update.get("additional_information", ""),
+            ),
+            "evidence": evidence_items,
+        },
+        "jira": {
+            "issue_key": jira_result["issue_key"],
+            "jira_url": jira_result.get("jira_url"),
+        },
+    }
+
+
+def send_customer_case_update_to_make(
+    case_update, *, jira_result, download_url_factory, post_request=_post_json
+):
+    """Send new information to the existing Jira case and return a receipt."""
+    event = build_customer_case_update_event(
+        case_update,
+        jira_result=jira_result,
+        download_url_factory=download_url_factory,
+    )
+    try:
+        response_status, response_text = post_request(
+            _read_make_webhook_url(),
+            event=event,
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": event["event_id"],
+            },
+            timeout=HANDOFF_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise CaseHandoffError(
+            "The case update could not be handed to Make. Check the scenario "
+            "history before retrying."
+        ) from exc
+    if not 200 <= response_status < 300:
+        raise CaseHandoffError(
+            f"Make rejected the case update with HTTP status {response_status}."
+        )
+    receipt = {
+        "case_reference": case_update["case_reference"],
+        "update_reference": case_update["update_reference"],
+        "event_id": event["event_id"],
+        "sent_at": event["sent_at"],
+        "http_status": response_status,
+        "status": "accepted",
+    }
+    returned_jira = _parse_jira_result(str(response_text or "").strip())
+    receipt["jira_result"] = returned_jira or jira_result
     return receipt
 
 

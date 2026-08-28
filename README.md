@@ -128,6 +128,7 @@ migrations/001_customer_cases.sql
 migrations/002_case_processing_metrics.sql
 migrations/003_northstar_complaint_policies.sql
 migrations/004_customer_case_schema_cleanup.sql
+migrations/005_customer_case_updates.sql
 ```
 
 These create durable customer-case, evidence, grounded-analysis, lifecycle,
@@ -140,6 +141,13 @@ connects `workflow_results` directly to it, removes the obsolete empty
 `incident_cases` table, and removes the unused customer-photo observation
 column. It refuses to drop `incident_cases` or detach unmatched workflow rows
 when legacy data is present, so that data must be reviewed first.
+
+Migration 005 prevents more than one active case for the same tracking number
+and complaint type, records repeat
+submission attempts for employees, and lets customers add information or new
+evidence to an existing case using its case reference and tracking number. A
+case update is designed to become a comment/attachment update on the original
+Jira issue rather than a second Jira ticket.
 
 After applying migration 003, run `python index_policies.py` once in the project
 environment. This chunks and embeds the five policy texts so semantic policy

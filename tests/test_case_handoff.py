@@ -5,8 +5,10 @@ from unittest.mock import patch
 from case_handoff import (
     CaseHandoffError,
     build_customer_case_handoff_event,
+    build_customer_case_update_event,
     build_handoff_event,
     send_customer_case_to_make,
+    send_customer_case_update_to_make,
     send_case_to_make,
 )
 from incident_case import IncidentCase
@@ -42,6 +44,64 @@ def make_case():
 
 
 class CaseHandoffTests(unittest.TestCase):
+    def test_customer_update_targets_existing_jira_issue(self):
+        case_update = {
+            "case_reference": "CASE-20260826-ABC123",
+            "update_reference": "UPDATE-ABC123",
+            "new_additional_information": "Added the purchase receipt.",
+            "evidence": [{
+                "evidence_id": 9,
+                "file_name": "receipt.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 4321,
+                "evidence_kind": "document",
+                "processing_status": "indexed",
+                "document_id": 12,
+                "s3_object_key": "customer-cases/CASE/evidence/receipt.pdf",
+            }],
+        }
+        event = build_customer_case_update_event(
+            case_update,
+            jira_result={"issue_key": "OPS-42"},
+            download_url_factory=lambda _key: "https://signed.example/receipt",
+            sent_at="2026-08-28T10:00:00Z",
+        )
+        self.assertEqual(event["event_type"], "saidia.customer_case.updated")
+        self.assertEqual(event["event_id"], "customer-update-UPDATE-ABC123")
+        self.assertEqual(event["jira"]["issue_key"], "OPS-42")
+        self.assertEqual(
+            event["update"]["evidence"][0]["attachment_download_url"],
+            "https://signed.example/receipt",
+        )
+
+    def test_customer_update_reuses_update_idempotency_key(self):
+        captured = {}
+
+        def fake_post(_url, **kwargs):
+            captured.update(kwargs)
+            return 200, '{"issue_key":"OPS-42","status":"To Do"}'
+
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_customer_case_update_to_make(
+                {
+                    "case_reference": "CASE-1",
+                    "update_reference": "UPDATE-1",
+                    "additional_information": "New detail",
+                    "evidence": [],
+                },
+                jira_result={"issue_key": "OPS-42"},
+                download_url_factory=lambda _key: "https://signed.example/file",
+                post_request=fake_post,
+            )
+        self.assertEqual(
+            captured["headers"]["Idempotency-Key"],
+            "customer-update-UPDATE-1",
+        )
+        self.assertEqual(receipt["jira_result"]["issue_key"], "OPS-42")
+
     def test_customer_handoff_attaches_images_without_ai_interpretation(self):
         customer_case = {
             "case_reference": "CASE-20260826-ABC123",
@@ -72,6 +132,7 @@ class CaseHandoffTests(unittest.TestCase):
 
         self.assertEqual(event["event_version"], "1.0")
         self.assertEqual(event["case"]["final_decision_owner"], "human_reviewer")
+        self.assertNotIn("customer_email", event["case"])
         self.assertNotIn("ai_observations", event)
         self.assertNotIn("s3_object_key", event["evidence"][0])
         self.assertEqual(

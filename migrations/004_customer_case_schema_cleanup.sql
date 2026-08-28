@@ -22,40 +22,19 @@ alter table workflow_results
     add column if not exists customer_case_id bigint
         references customer_cases(id) on delete cascade;
 
--- Preserve any workflow result that already uses a customer case reference.
-do $$
-begin
-    if exists (
-        select 1
-        from information_schema.columns
-        where table_schema = 'public'
-          and table_name = 'workflow_results'
-          and column_name = 'case_id'
-    ) then
-        execute $sql$
-            update workflow_results workflow
-            set customer_case_id = customer.id
-            from customer_cases customer
-            where workflow.customer_case_id is null
-              and workflow.case_id = customer.case_reference
-        $sql$;
-    end if;
-end
-$$;
-
 do $$
 declare
-    unmatched_workflow_count bigint;
+    legacy_workflow_count bigint;
 begin
     select count(*)
-    into unmatched_workflow_count
+    into legacy_workflow_count
     from workflow_results
     where customer_case_id is null;
 
-    if unmatched_workflow_count > 0 then
+    if legacy_workflow_count > 0 then
         raise exception
-            'workflow_results contains % row(s) that do not match customer_cases. Migrate or archive them before applying migration 004.',
-            unmatched_workflow_count;
+            'workflow_results contains % legacy incident result row(s). Archive them before applying migration 004.',
+            legacy_workflow_count;
     end if;
 end
 $$;

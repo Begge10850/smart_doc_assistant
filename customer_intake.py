@@ -41,8 +41,23 @@ def validate_customer_submission(
     if complaint_type not in COMPLAINT_TYPE_LABELS:
         errors.append("Select what happened to your delivery.")
     if not EMAIL_PATTERN.fullmatch(customer_email.strip().lower()):
-        errors.append("Enter a valid email address.")
+        errors.append("Enter a valid contact email address.")
+    errors.extend(validate_evidence_files(evidence_files))
+    evidence_files = list(evidence_files or [])
+    if complaint_type in EVIDENCE_REQUIREMENTS:
+        has_image = any(
+            Path(evidence_file.name).suffix.lower().lstrip(".")
+            in IMAGE_EVIDENCE_TYPES
+            for evidence_file in evidence_files
+        )
+        if not has_image:
+            errors.append(EVIDENCE_REQUIREMENTS[complaint_type] + ".")
+    return errors
 
+
+def validate_evidence_files(evidence_files):
+    """Validate shared evidence limits for new cases and case updates."""
+    errors = []
     evidence_files = list(evidence_files or [])
     if len(evidence_files) > MAX_EVIDENCE_FILES:
         errors.append(f"Upload no more than {MAX_EVIDENCE_FILES} evidence files.")
@@ -66,24 +81,26 @@ def validate_customer_submission(
     if total_size > MAX_TOTAL_EVIDENCE_BYTES:
         errors.append("Combined evidence must not exceed 50 MB.")
 
-    if complaint_type in EVIDENCE_REQUIREMENTS:
-        has_image = any(
-            Path(evidence_file.name).suffix.lower().lstrip(".")
-            in IMAGE_EVIDENCE_TYPES
-            for evidence_file in evidence_files
-        )
-        if not has_image:
-            errors.append(EVIDENCE_REQUIREMENTS[complaint_type] + ".")
     return errors
 
 
-def build_customer_complaint(
-    claimant_role, tracking_number, country, delivery_date,
-    declared_value, complaint_type, customer_email, additional_information,
-    evidence_files
+def validate_case_update(
+    case_reference, tracking_number, additional_information, evidence_files
 ):
-    """Create the normalized complaint contract used by persistence and workflow."""
-    reported_at = datetime.now(timezone.utc)
+    """Validate credentials and content supplied for an existing-case update."""
+    errors = []
+    if not case_reference.strip():
+        errors.append("Enter your case reference.")
+    if not tracking_number.strip():
+        errors.append("Enter your tracking number.")
+    if not additional_information.strip() and not list(evidence_files or []):
+        errors.append("Add information or upload at least one evidence file.")
+    errors.extend(validate_evidence_files(evidence_files))
+    return errors
+
+
+def normalize_evidence_files(evidence_files):
+    """Return the normalized in-memory evidence contract."""
     evidence = []
     for evidence_file in evidence_files or []:
         file_data = evidence_file.getvalue()
@@ -93,6 +110,16 @@ def build_customer_complaint(
             "size_bytes": len(file_data),
             "data": file_data,
         })
+    return evidence
+
+
+def build_customer_complaint(
+    claimant_role, tracking_number, country, delivery_date,
+    declared_value, complaint_type, customer_email, additional_information,
+    evidence_files
+):
+    """Create the normalized complaint contract used by persistence and workflow."""
+    reported_at = datetime.now(timezone.utc)
     return {
         "case_reference": f"CASE-{reported_at:%Y%m%d}-{uuid4().hex[:10].upper()}",
         "reported_at": reported_at.isoformat(),
@@ -106,6 +133,20 @@ def build_customer_complaint(
         "complaint_type": complaint_type,
         "customer_email": customer_email.strip().lower(),
         "additional_information": additional_information.strip(),
-        "evidence": evidence,
+        "evidence": normalize_evidence_files(evidence_files),
         "downstream_processing_status": "not_connected",
+    }
+
+
+def build_customer_case_update(
+    case_reference, tracking_number, additional_information, evidence_files
+):
+    """Create a normalized update contract for one existing customer case."""
+    return {
+        "update_reference": f"UPDATE-{uuid4().hex[:12].upper()}",
+        "case_reference": case_reference.strip().upper(),
+        "tracking_number": tracking_number.strip(),
+        "additional_information": additional_information.strip(),
+        "evidence": normalize_evidence_files(evidence_files),
+        "processing_status": "pending",
     }

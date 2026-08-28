@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 
 import psycopg
 import streamlit as st
@@ -82,6 +83,153 @@ def create_customer_case(complaint):
 
     complaint["customer_case_id"] = customer_case_id
     return customer_case_id
+
+
+def find_active_customer_case(tracking_number, complaint_type):
+    """Find an existing active case for the same shipment problem."""
+    query = """
+        select case_reference, status, downstream_processing_status, reported_at
+        from customer_cases
+        where upper(tracking_number) = upper(%s)
+          and complaint_type = %s
+          and status not in ('closed', 'cancelled')
+        order by reported_at desc
+        limit 1;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (tracking_number.strip(), complaint_type))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return {
+                "case_reference": row[0],
+                "status": row[1],
+                "downstream_processing_status": row[2],
+                "reported_at": row[3].isoformat(),
+            }
+
+
+def record_duplicate_submission_attempt(case_reference):
+    """Record a repeat report for employee visibility without a new case."""
+    query = """
+        with matched_case as (
+            update customer_cases
+            set duplicate_submission_count = duplicate_submission_count + 1,
+                last_duplicate_submission_at = now(),
+                updated_at = now()
+            where case_reference = %(case_reference)s
+            returning id
+        )
+        insert into customer_case_updates (
+            update_reference, customer_case_id, update_type,
+            additional_information, processing_status
+        )
+        select %(update_reference)s, id, 'duplicate_submission_attempt', '', 'recorded'
+        from matched_case;
+    """
+    update_reference = f"DUPLICATE-{uuid4().hex[:12].upper()}"
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, {
+                "case_reference": case_reference,
+                "update_reference": update_reference,
+            })
+        connection.commit()
+
+
+def create_customer_case_update(case_update):
+    """Verify an existing case and persist one update with evidence inventory."""
+    case_query = """
+        select id, case_reference, tracking_number, carrier, country,
+               delivery_date, declared_value, complaint_type,
+               additional_information, reported_at, status, claimant_role
+        from customer_cases
+        where upper(case_reference) = upper(%s)
+          and upper(tracking_number) = upper(%s)
+          and status not in ('closed', 'cancelled')
+        limit 1;
+    """
+    update_query = """
+        insert into customer_case_updates (
+            update_reference, customer_case_id, update_type,
+            additional_information, processing_status
+        ) values (%s, %s, 'additional_information', %s, 'pending')
+        returning id;
+    """
+    evidence_query = """
+        insert into customer_case_evidence (
+            customer_case_id, customer_case_update_id,
+            original_file_name, content_type, size_bytes
+        ) values (%s, %s, %s, %s, %s)
+        returning id;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                case_query,
+                (case_update["case_reference"], case_update["tracking_number"]),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            customer_case_id = row[0]
+            cursor.execute(
+                update_query,
+                (
+                    case_update["update_reference"],
+                    customer_case_id,
+                    case_update["additional_information"],
+                ),
+            )
+            case_update_id = cursor.fetchone()[0]
+            for evidence in case_update["evidence"]:
+                cursor.execute(
+                    evidence_query,
+                    (
+                        customer_case_id,
+                        case_update_id,
+                        evidence["file_name"],
+                        evidence.get("content_type"),
+                        evidence["size_bytes"],
+                    ),
+                )
+                evidence["evidence_id"] = cursor.fetchone()[0]
+        connection.commit()
+
+    case_update.update({
+        "customer_case_id": customer_case_id,
+        "customer_case_update_id": case_update_id,
+        "case_reference": row[1],
+        "tracking_number": row[2],
+        "carrier": row[3],
+        "country": row[4],
+        "delivery_date": row[5].isoformat() if row[5] else None,
+        "declared_value": row[6],
+        "complaint_type": row[7],
+        "original_additional_information": row[8],
+        "reported_at": row[9].isoformat(),
+        "status": row[10],
+        "claimant_role": row[11],
+    })
+    return case_update_id
+
+
+def update_customer_case_update_status(
+    update_reference, status, processing_error=None
+):
+    """Persist preparation status for one customer-supplied case update."""
+    query = """
+        update customer_case_updates
+        set processing_status = %s,
+            processing_error = %s,
+            updated_at = now()
+        where update_reference = %s;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (status, processing_error, update_reference))
+        connection.commit()
 
 
 def update_customer_case_status(case_reference, status, processing_error=None):
@@ -270,6 +418,34 @@ def save_customer_workflow_result(
         with connection.cursor() as cursor:
             cursor.execute(query, params)
         connection.commit()
+
+
+def get_latest_customer_jira_result(case_reference):
+    """Return the latest accepted Jira target for an existing customer case."""
+    query = """
+        select wr.jira_issue_key, wr.jira_title, wr.jira_routing,
+               wr.jira_status, wr.jira_url
+        from workflow_results wr
+        join customer_cases cc on cc.id = wr.customer_case_id
+        where cc.case_reference = %s
+          and wr.handoff_status = 'accepted'
+          and wr.jira_issue_key is not null
+        order by wr.updated_at desc
+        limit 1;
+    """
+    with psycopg.connect(get_database_url()) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (case_reference,))
+            row = cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "issue_key": row[0],
+        "title": row[1],
+        "routing": row[2],
+        "status": row[3],
+        "jira_url": row[4],
+    }
 
 def upsert_document(
     *,
