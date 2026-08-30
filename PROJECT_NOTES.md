@@ -35,6 +35,11 @@ Implementation boundaries:
 
 - Keep this dashboard separate from the customer-facing confirmation screen.
 - Require employee/internal access before showing customer or Jira information.
+- Read the dashboard directly from hosted PostgreSQL/Supabase records, including
+  `customer_cases`, `workflow_results`, `case_processing_events`, and related
+  evidence and update records.
+- Treat Google Sheets as optional reporting/export only, not as the dashboard's
+  source of truth.
 - Start with a read-only table and case details; do not allow Jira editing until
   permissions, audit history, and update behaviour are designed explicitly.
 - Jira remains the operational system of record for employee decisions and

@@ -73,6 +73,10 @@ class CaseHandoffTests(unittest.TestCase):
             event["update"]["evidence"][0]["attachment_download_url"],
             "https://signed.example/receipt",
         )
+        self.assertEqual(
+            event["update"]["evidence"][0]["attachment_url_expires_in_seconds"],
+            3600,
+        )
 
     def test_customer_update_reuses_update_idempotency_key(self):
         captured = {}
@@ -138,6 +142,10 @@ class CaseHandoffTests(unittest.TestCase):
         self.assertEqual(
             event["evidence"][0]["attachment_download_url"],
             "https://signed.example/evidence",
+        )
+        self.assertEqual(
+            event["evidence"][0]["attachment_url_expires_in_seconds"],
+            3600,
         )
 
     def test_customer_handoff_uses_stable_idempotency_key(self):

@@ -9,10 +9,11 @@ from botocore.exceptions import ClientError, NoCredentialsError, PartialCredenti
 from dotenv import load_dotenv
 import streamlit as st
 
+from evidence_config import EVIDENCE_DOWNLOAD_EXPIRY_SECONDS
+
 
 S3_BUCKET = "smart-doc-assistant-saidia"
 REGION = "eu-north-1"
-EVIDENCE_DOWNLOAD_EXPIRY_SECONDS = 900
 
 
 class S3UploadError(RuntimeError):

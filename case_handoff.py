@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+from evidence_config import EVIDENCE_DOWNLOAD_EXPIRY_SECONDS
 from incident_case import IncidentCase
 
 
@@ -173,7 +174,7 @@ def build_customer_case_handoff_event(customer_case, *, download_url_factory, se
             "processing_status": evidence.get("processing_status"),
             "document_id": evidence.get("document_id"),
             "attachment_download_url": download_url_factory(evidence["s3_object_key"]),
-            "attachment_url_expires_in_seconds": 900,
+            "attachment_url_expires_in_seconds": EVIDENCE_DOWNLOAD_EXPIRY_SECONDS,
         })
 
     case_fields = {
@@ -258,7 +259,7 @@ def build_customer_case_update_event(
             "attachment_download_url": download_url_factory(
                 evidence["s3_object_key"]
             ),
-            "attachment_url_expires_in_seconds": 900,
+            "attachment_url_expires_in_seconds": EVIDENCE_DOWNLOAD_EXPIRY_SECONDS,
         })
     return {
         "event_type": CUSTOMER_UPDATE_EVENT_TYPE,
