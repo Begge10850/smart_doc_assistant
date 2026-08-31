@@ -149,6 +149,14 @@ def start_customer_update():
     st.session_state.pop("customer_case_update", None)
     st.session_state.customer_intake_view = "update_form"
 
+
+def return_to_case_options():
+    """Abandon an unfinished form and return to the customer landing view."""
+    reset_customer_form_state()
+    st.session_state.pop("customer_complaint", None)
+    st.session_state.pop("customer_case_update", None)
+    st.session_state.customer_intake_view = "landing"
+
 def run_customer_stage(
     case_reference, stage, function, *args, evidence_id=None, function_kwargs=None
 ):
@@ -679,6 +687,11 @@ if customer_intake_view == "landing":
         )
 
 elif customer_intake_view == "form":
+    st.button(
+        "← Back to case options",
+        key="back_from_customer_report",
+        on_click=return_to_case_options,
+    )
     st.subheader("Report a Delivery Problem")
     st.caption(
         f"Fictional evaluation environment for {CONFIGURED_CARRIER}. "
@@ -846,6 +859,11 @@ elif customer_intake_view == "form":
         )
 
 elif customer_intake_view == "update_form":
+    st.button(
+        "← Back to case options",
+        key="back_from_customer_update",
+        on_click=return_to_case_options,
+    )
     st.subheader("Update an Existing Case")
     st.markdown(
         "Enter the case reference shown after your original report together "
