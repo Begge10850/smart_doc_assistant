@@ -183,6 +183,8 @@ def build_customer_case_handoff_event(customer_case, *, download_url_factory, se
             "case_reference", "reported_at", "status", "claimant_role",
             "tracking_number", "carrier", "country", "delivery_date",
             "declared_value", "complaint_type", "additional_information",
+            "complaint_details", "evidence_types", "intake_source",
+            "intake_completeness",
         )
     }
     case_fields["final_decision_owner"] = "human_reviewer"

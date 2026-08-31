@@ -48,12 +48,15 @@ def create_customer_case(complaint):
             case_reference, reported_at, status, claimant_role, tracking_number,
             carrier, country, delivery_date, declared_value,
             complaint_type, customer_email, additional_information,
+            complaint_details, evidence_types, intake_source, intake_completeness,
             downstream_processing_status
         ) values (
             %(case_reference)s, %(reported_at)s, %(status)s, %(claimant_role)s,
             %(tracking_number)s, %(carrier)s, %(country)s, %(delivery_date)s,
             %(declared_value)s, %(complaint_type)s, %(customer_email)s,
-            %(additional_information)s, %(downstream_processing_status)s
+            %(additional_information)s, %(complaint_details)s, %(evidence_types)s,
+            %(intake_source)s, %(intake_completeness)s,
+            %(downstream_processing_status)s
         )
         returning id;
     """
@@ -66,7 +69,14 @@ def create_customer_case(complaint):
 
     with psycopg.connect(get_database_url()) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(case_query, complaint)
+            params = dict(complaint)
+            params["complaint_details"] = psycopg.types.json.Jsonb(
+                complaint.get("complaint_details", {})
+            )
+            params["evidence_types"] = psycopg.types.json.Jsonb(
+                complaint.get("evidence_types", [])
+            )
+            cursor.execute(case_query, params)
             customer_case_id = cursor.fetchone()[0]
             for evidence in complaint["evidence"]:
                 cursor.execute(
@@ -338,7 +348,8 @@ def get_customer_case_for_handoff(case_reference):
                tracking_number, carrier, country, delivery_date, declared_value,
                complaint_type, customer_email,
                additional_information, downstream_processing_status,
-               analysis_status, case_analysis
+               analysis_status, case_analysis, complaint_details, evidence_types,
+               intake_source, intake_completeness
         from customer_cases
         where case_reference = %s;
     """

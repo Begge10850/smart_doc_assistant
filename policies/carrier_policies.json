@@ -34,7 +34,7 @@
     "deadline_basis": "calendar days after the expected delivery date",
     "required_evidence": [
       "tracking number",
-      "delivery date",
+      "expected delivery date",
       "commercial invoice or other proof of value",
       "description of the parcel contents"
     ],
@@ -56,8 +56,23 @@
     "deadline_basis": "calendar days after actual delivery",
     "required_evidence": [
       "tracking number",
-      "delivery date",
+      "actual delivery date",
       "evidence of the promised delivery date"
+    ],
+    "service_commitments": {
+      "northstar_standard": {"expected_transit_days": 5},
+      "northstar_express": {"expected_transit_days": 3}
+    },
+    "delivery_fee_reimbursement_review": {
+      "one_day_late": "review_partial_delivery_fee_reimbursement",
+      "two_or_more_days_late": "review_full_delivery_fee_reimbursement",
+      "final_decision_owner": "human_reviewer"
+    },
+    "policy_exclusions": [
+      "severe_weather",
+      "customs_delay",
+      "customer_requested_delivery_change",
+      "incomplete_address"
     ],
     "handling_guidance": [
       "Compare the promised and actual delivery dates using supplied records.",

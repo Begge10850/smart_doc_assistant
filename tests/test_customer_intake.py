@@ -6,6 +6,8 @@ from customer_intake import (
     MAX_IMAGE_SIZE_BYTES,
     build_customer_case_update,
     build_customer_complaint,
+    calculate_delay_days,
+    recommend_late_delivery_fee_review,
     validate_case_update,
     validate_customer_submission,
 )
@@ -28,7 +30,73 @@ class CustomerIntakeTests(unittest.TestCase):
             "parcel_damage", "customer@example.com", []
         )
         self.assertTrue(any("delivery date" in error for error in errors))
-        self.assertTrue(any("JPG or PNG" in error for error in errors))
+        self.assertTrue(any("damaged item" in error for error in errors))
+        self.assertTrue(any("external packaging" in error for error in errors))
+        self.assertTrue(any("proof of value" in error for error in errors))
+
+    def test_complete_damage_submission_passes_complaint_requirements(self):
+        errors = validate_customer_submission(
+            "TRACK-1", "Germany", date(2026, 8, 27),
+            "parcel_damage", "customer@example.com",
+            [FakeUpload("damage.jpg"), FakeUpload("packaging.jpg")],
+            complaint_details={"declared_value": "EUR 50"},
+            evidence_types=["damage_photo", "packaging_photo", "proof_of_value"],
+        )
+        self.assertEqual(errors, [])
+
+    def test_lost_and_delivered_not_received_require_different_facts(self):
+        lost_errors = validate_customer_submission(
+            "TRACK-1", "Germany", None, "lost_parcel",
+            "customer@example.com", [], complaint_details={}, evidence_types=[],
+        )
+        non_delivery_errors = validate_customer_submission(
+            "TRACK-1", "Germany", None, "non_delivery",
+            "customer@example.com", [], complaint_details={}, evidence_types=[],
+        )
+        self.assertTrue(any("latest tracking status" in item for item in lost_errors))
+        self.assertFalse(any("recipient confirmation" in item for item in lost_errors))
+        self.assertTrue(any("recipient confirmation" in item for item in non_delivery_errors))
+        self.assertTrue(any("carrier tracking shows delivered" in item for item in non_delivery_errors))
+
+    def test_late_delivery_calculation_and_human_review_guidance(self):
+        self.assertEqual(
+            calculate_delay_days(date(2026, 8, 20), date(2026, 8, 22)), 2
+        )
+        self.assertEqual(
+            recommend_late_delivery_fee_review(1, []),
+            "review_partial_delivery_fee_reimbursement",
+        )
+        self.assertEqual(
+            recommend_late_delivery_fee_review(2, []),
+            "review_full_delivery_fee_reimbursement",
+        )
+        self.assertEqual(
+            recommend_late_delivery_fee_review(2, ["severe_weather"]),
+            "human_review_required_due_to_possible_policy_exclusion",
+        )
+
+    def test_late_delivery_contract_contains_policy_review_fields(self):
+        complaint = build_customer_complaint(
+            "Recipient", "TRACK-2", "Germany", date(2026, 8, 22), "",
+            "late_delivery", "customer@example.com", "Arrived late", [],
+            complaint_details={
+                "service_type": "NorthStar Express",
+                "promised_duration_days": 3,
+                "promised_delivery_date": date(2026, 8, 20),
+                "actual_delivery_date": date(2026, 8, 22),
+                "policy_exclusions": [],
+            },
+            evidence_types=["promised_delivery_evidence"],
+        )
+        details = complaint["complaint_details"]
+        self.assertEqual(details["delay_duration_days"], 2)
+        self.assertEqual(
+            details["reimbursement_recommendation"],
+            "review_full_delivery_fee_reimbursement",
+        )
+        self.assertTrue(details["reimbursement_requires_human_review"])
+        self.assertEqual(complaint["intake_source"], "web_form")
+        self.assertEqual(complaint["intake_completeness"], "complete")
 
     def test_oversized_image_is_rejected(self):
         upload = FakeUpload("damage.jpg", b"x" * (MAX_IMAGE_SIZE_BYTES + 1))

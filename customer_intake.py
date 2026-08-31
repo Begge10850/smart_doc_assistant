@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -19,16 +19,63 @@ COMPLAINT_TYPE_LABELS = {
     "partial_loss": "Some items are missing",
     "non_delivery": "Package shows delivered but was not received",
 }
-EVIDENCE_REQUIREMENTS = {
-    "parcel_damage": "At least one JPG or PNG photo of the damaged parcel or goods",
-    "partial_loss": "At least one JPG or PNG photo of the parcel, contents, or packaging",
+EVIDENCE_TYPE_LABELS = {
+    "damage_photo": "Photo of the damaged item",
+    "packaging_photo": "Photo of the external packaging",
+    "proof_of_value": "Invoice, receipt, order confirmation, or other proof of value",
+    "promised_delivery_evidence": "Evidence of the promised delivery date",
+    "delivery_status_evidence": "Evidence that carrier tracking shows delivered",
+    "packing_list": "Packing list or other record of the parcel contents",
+}
+COMPLAINT_REQUIREMENTS = {
+    "parcel_damage": {
+        "required_fields": ("delivery_date", "declared_value"),
+        "required_evidence": ("damage_photo", "packaging_photo", "proof_of_value"),
+    },
+    "lost_parcel": {
+        "required_fields": (
+            "expected_delivery_date", "declared_value", "package_contents_description",
+            "tracking_status",
+        ),
+        "required_evidence": ("proof_of_value",),
+    },
+    "late_delivery": {
+        "required_fields": (
+            "service_type", "promised_delivery_date", "actual_delivery_date",
+        ),
+        "required_evidence": ("promised_delivery_evidence",),
+    },
+    "partial_loss": {
+        "required_fields": (
+            "delivery_date", "declared_value", "missing_items_description",
+        ),
+        "required_evidence": ("packaging_photo", "proof_of_value", "packing_list"),
+    },
+    "non_delivery": {
+        "required_fields": ("carrier_recorded_delivery_date", "recipient_statement"),
+        "required_evidence": ("delivery_status_evidence",),
+    },
+}
+FIELD_LABELS = {
+    "delivery_date": "delivery date",
+    "expected_delivery_date": "expected delivery date",
+    "declared_value": "declared or purchase value",
+    "package_contents_description": "description of the parcel contents",
+    "tracking_status": "latest tracking status",
+    "service_type": "delivery service type",
+    "promised_delivery_date": "promised delivery date",
+    "actual_delivery_date": "actual delivery date",
+    "missing_items_description": "description of the missing items",
+    "carrier_recorded_delivery_date": "carrier-recorded delivery date",
+    "recipient_statement": "recipient confirmation that the parcel was not received",
 }
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def validate_customer_submission(
     tracking_number, country, delivery_date, complaint_type,
-    customer_email, evidence_files
+    customer_email, evidence_files, *, complaint_details=None,
+    evidence_types=None
 ):
     """Return customer-facing validation errors without external side effects."""
     errors = []
@@ -36,23 +83,76 @@ def validate_customer_submission(
         errors.append("Enter your tracking number.")
     if country not in SUPPORTED_COUNTRIES:
         errors.append("Enter the destination country.")
-    if delivery_date is None:
-        errors.append("Enter the delivery or expected delivery date.")
     if complaint_type not in COMPLAINT_TYPE_LABELS:
         errors.append("Select what happened to your delivery.")
     if not EMAIL_PATTERN.fullmatch(customer_email.strip().lower()):
         errors.append("Enter a valid contact email address.")
     errors.extend(validate_evidence_files(evidence_files))
-    evidence_files = list(evidence_files or [])
-    if complaint_type in EVIDENCE_REQUIREMENTS:
-        has_image = any(
-            Path(evidence_file.name).suffix.lower().lstrip(".")
-            in IMAGE_EVIDENCE_TYPES
-            for evidence_file in evidence_files
+    details = dict(complaint_details or {})
+    if delivery_date is not None:
+        details.setdefault("delivery_date", delivery_date)
+    requirements = COMPLAINT_REQUIREMENTS.get(complaint_type, {})
+    for field in requirements.get("required_fields", ()):
+        value = details.get(field)
+        if value is None or (isinstance(value, str) and not value.strip()) or value is False:
+            errors.append(f"Enter {FIELD_LABELS[field]}.")
+
+    selected_evidence = set(evidence_types or [])
+    if selected_evidence and not list(evidence_files or []):
+        errors.append("Upload the evidence files you identified.")
+    for evidence_type in requirements.get("required_evidence", ()):
+        if evidence_type not in selected_evidence:
+            errors.append(f"Provide {EVIDENCE_TYPE_LABELS[evidence_type].lower()}.")
+
+    image_evidence = {"damage_photo", "packaging_photo"}.intersection(selected_evidence)
+    if image_evidence:
+        image_count = sum(
+            Path(item.name).suffix.lower().lstrip(".") in IMAGE_EVIDENCE_TYPES
+            for item in (evidence_files or [])
         )
-        if not has_image:
-            errors.append(EVIDENCE_REQUIREMENTS[complaint_type] + ".")
+        if image_count < len(image_evidence):
+            errors.append(
+                "Upload a separate JPG or PNG file for each required photo type."
+            )
+
+    promised = _as_date(details.get("promised_delivery_date"))
+    actual = _as_date(details.get("actual_delivery_date"))
+    if complaint_type == "late_delivery" and promised and actual and actual <= promised:
+        errors.append("Actual delivery must be after the promised delivery date for a late-delivery complaint.")
     return errors
+
+
+def _as_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def calculate_delay_days(promised_delivery_date, actual_delivery_date):
+    """Return calendar days late when both dates are valid and delivery was late."""
+    promised = _as_date(promised_delivery_date)
+    actual = _as_date(actual_delivery_date)
+    if not promised or not actual:
+        return None
+    return max((actual - promised).days, 0)
+
+
+def recommend_late_delivery_fee_review(delay_days, policy_exclusions):
+    """Return non-binding fictional-policy guidance for a human reviewer."""
+    if delay_days is None or delay_days <= 0:
+        return None
+    if policy_exclusions:
+        return "human_review_required_due_to_possible_policy_exclusion"
+    if delay_days == 1:
+        return "review_partial_delivery_fee_reimbursement"
+    return "review_full_delivery_fee_reimbursement"
 
 
 def validate_evidence_files(evidence_files):
@@ -116,11 +216,29 @@ def normalize_evidence_files(evidence_files):
 def build_customer_complaint(
     claimant_role, tracking_number, country, delivery_date,
     declared_value, complaint_type, customer_email, additional_information,
-    evidence_files
+    evidence_files, *, complaint_details=None, evidence_types=None
 ):
     """Create the normalized complaint contract used by persistence and workflow."""
     reported_at = datetime.now(timezone.utc)
-    return {
+    details = dict(complaint_details or {})
+    normalized_details = {
+        key: value.isoformat() if isinstance(value, (date, datetime)) else value
+        for key, value in details.items()
+    }
+    promised_date = normalized_details.get("promised_delivery_date")
+    actual_date = normalized_details.get("actual_delivery_date")
+    normalized_details["delay_duration_days"] = calculate_delay_days(
+        promised_date, actual_date
+    )
+    normalized_details.setdefault("policy_exclusions", [])
+    normalized_details["reimbursement_recommendation"] = (
+        recommend_late_delivery_fee_review(
+            normalized_details["delay_duration_days"],
+            normalized_details["policy_exclusions"],
+        ) if complaint_type == "late_delivery" else None
+    )
+    normalized_details["reimbursement_requires_human_review"] = True
+    complaint = {
         "case_reference": f"CASE-{reported_at:%Y%m%d}-{uuid4().hex[:10].upper()}",
         "reported_at": reported_at.isoformat(),
         "status": "submitted",
@@ -134,8 +252,13 @@ def build_customer_complaint(
         "customer_email": customer_email.strip().lower(),
         "additional_information": additional_information.strip(),
         "evidence": normalize_evidence_files(evidence_files),
+        "evidence_types": sorted(set(evidence_types or [])),
+        "complaint_details": normalized_details,
+        "intake_source": "web_form",
+        "intake_completeness": "complete",
         "downstream_processing_status": "not_connected",
     }
+    return complaint
 
 
 def build_customer_case_update(

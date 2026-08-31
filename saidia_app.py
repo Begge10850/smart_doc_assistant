@@ -27,7 +27,9 @@ from case_handoff import (
 )
 from customer_intake import (
     COMPLAINT_TYPE_LABELS,
+    COMPLAINT_REQUIREMENTS,
     CONFIGURED_CARRIER,
+    EVIDENCE_TYPE_LABELS,
     IMAGE_EVIDENCE_TYPES,
     SUPPORTED_COUNTRIES,
     SUPPORTED_EVIDENCE_TYPES,
@@ -97,6 +99,18 @@ CUSTOMER_FORM_WIDGET_KEYS = [
     "customer_incident_type",
     "customer_email",
     "customer_delivery_date",
+    "customer_expected_delivery_date",
+    "customer_carrier_recorded_delivery_date",
+    "customer_service_type",
+    "customer_promised_duration_days",
+    "customer_promised_delivery_date",
+    "customer_actual_delivery_date",
+    "customer_tracking_status",
+    "customer_package_contents_description",
+    "customer_missing_items_description",
+    "customer_recipient_statement",
+    "customer_policy_exclusions",
+    "customer_evidence_types",
     "customer_declared_value",
     "customer_evidence_files",
     "customer_additional_information",
@@ -318,6 +332,10 @@ def prepare_customer_case_analysis(complaint):
         f"Reported date: {complaint['reported_at'][:10]}",
         f"Claimant role: {complaint['claimant_role']}",
         f"Customer statement: {complaint['additional_information'] or 'Not supplied'}",
+        "Complaint-specific facts: "
+        + json.dumps(complaint.get("complaint_details", {}), sort_keys=True),
+        "Customer-labelled evidence types: "
+        + ", ".join(complaint.get("evidence_types", [])),
         "Evidence available:",
         *(f"- {label}" for label in evidence_labels),
         "Retrieved evidence passages:",
@@ -637,6 +655,31 @@ elif customer_intake_view == "form":
         "Policies are project examples, not real carrier terms."
     )
 
+    incident_type = st.selectbox(
+        "What happened?",
+        options=list(COMPLAINT_TYPE_LABELS),
+        index=None,
+        placeholder="Select a problem",
+        format_func=lambda value: COMPLAINT_TYPE_LABELS[value],
+        key="customer_incident_type",
+        help=(
+            "Package is lost means tracking has no valid delivery event. "
+            "Delivered but not received means carrier tracking explicitly shows delivered."
+        ),
+    )
+    if incident_type:
+        requirements = COMPLAINT_REQUIREMENTS[incident_type]
+        st.info(
+            "Required evidence: "
+            + "; ".join(
+                EVIDENCE_TYPE_LABELS[item]
+                for item in requirements["required_evidence"]
+            )
+        )
+
+    complaint_details = {}
+    evidence_types = []
+    delivery_date = None
     with st.form("customer_complaint_form", clear_on_submit=False):
         claimant_role = st.radio(
             "Are you the sender or recipient?",
@@ -656,38 +699,106 @@ elif customer_intake_view == "form":
             placeholder="Select a country",
             key="customer_country",
         )
-        incident_type = st.selectbox(
-            "What happened?",
-            options=list(COMPLAINT_TYPE_LABELS),
-            index=None,
-            placeholder="Select a problem",
-            format_func=lambda value: COMPLAINT_TYPE_LABELS[value],
-            key="customer_incident_type",
-        )
         customer_email = st.text_input(
             "Contact email",
             placeholder="Enter an email address the case team can use to contact you",
             key="customer_email",
         )
-        delivery_date = st.date_input(
-            "Delivery or expected delivery date",
-            value=None,
-            help="Use the expected delivery date when the parcel was never delivered.",
-            key="customer_delivery_date",
-        )
-        declared_value = st.text_input(
-            "Declared or purchase value (optional)",
-            placeholder="For example, EUR 899.00",
-            key="customer_declared_value",
-        )
+        declared_value = ""
+        if incident_type in {"parcel_damage", "partial_loss"}:
+            delivery_date = st.date_input(
+                "Actual delivery date *", value=None, key="customer_delivery_date"
+            )
+            complaint_details["delivery_date"] = delivery_date
+        elif incident_type == "lost_parcel":
+            expected_date = st.date_input(
+                "Expected delivery date *", value=None,
+                key="customer_expected_delivery_date",
+            )
+            delivery_date = expected_date
+            complaint_details["expected_delivery_date"] = expected_date
+            complaint_details["tracking_status"] = st.text_input(
+                "Latest carrier tracking status *",
+                placeholder="For example, departed regional hub on 12 August",
+                key="customer_tracking_status",
+            )
+            complaint_details["package_contents_description"] = st.text_area(
+                "Parcel contents *", key="customer_package_contents_description"
+            )
+        elif incident_type == "late_delivery":
+            complaint_details["service_type"] = st.text_input(
+                "Delivery service type *",
+                placeholder="For example, NorthStar Express",
+                key="customer_service_type",
+            )
+            complaint_details["promised_duration_days"] = st.number_input(
+                "Promised transit duration in days (if known)",
+                min_value=1, value=None, step=1,
+                key="customer_promised_duration_days",
+            )
+            complaint_details["promised_delivery_date"] = st.date_input(
+                "Promised delivery date *", value=None,
+                key="customer_promised_delivery_date",
+            )
+            actual_date = st.date_input(
+                "Actual delivery date *", value=None,
+                key="customer_actual_delivery_date",
+            )
+            complaint_details["actual_delivery_date"] = actual_date
+            delivery_date = actual_date
+            complaint_details["policy_exclusions"] = st.multiselect(
+                "Known delay circumstances (optional; reviewed against policy)",
+                options=[
+                    "severe_weather", "customs_delay",
+                    "customer_requested_delivery_change", "incomplete_address",
+                ],
+                format_func=lambda value: value.replace("_", " ").title(),
+                key="customer_policy_exclusions",
+            )
+            st.caption(
+                "Any delivery-fee reimbursement is only a policy-guided "
+                "recommendation and always requires human review."
+            )
+        if incident_type == "partial_loss":
+            complaint_details["missing_items_description"] = st.text_area(
+                "Missing items *", key="customer_missing_items_description"
+            )
+        elif incident_type == "non_delivery":
+            recorded_date = st.date_input(
+                "Carrier-recorded delivery date *", value=None,
+                key="customer_carrier_recorded_delivery_date",
+            )
+            delivery_date = recorded_date
+            complaint_details["carrier_recorded_delivery_date"] = recorded_date
+            complaint_details["recipient_statement"] = st.checkbox(
+                "I confirm that the carrier shows this parcel as delivered, "
+                "but the recipient did not receive it. *",
+                key="customer_recipient_statement",
+            )
+
+        if incident_type in {"parcel_damage", "lost_parcel", "partial_loss"}:
+            declared_value = st.text_input(
+                "Declared or purchase value *",
+                placeholder="For example, EUR 899.00",
+                key="customer_declared_value",
+            )
+            complaint_details["declared_value"] = declared_value
+
+        if incident_type:
+            evidence_types = st.multiselect(
+                "Confirm the required evidence included in the files below *",
+                options=list(COMPLAINT_REQUIREMENTS[incident_type]["required_evidence"]),
+                format_func=lambda value: EVIDENCE_TYPE_LABELS[value],
+                key="customer_evidence_types",
+                help="Select every evidence type present, then upload the matching files.",
+            )
         evidence_files = st.file_uploader(
             "Supporting evidence",
             type=SUPPORTED_EVIDENCE_TYPES,
             accept_multiple_files=True,
             help=(
                 "Upload up to 10 files (50 MB combined). Images: 10 MB each. "
-                "Documents: 20 MB each. Damage and missing-item complaints require "
-                "at least one JPG or PNG photo."
+                "Documents: 20 MB each. The evidence list above changes with the complaint."
             ),
             key="customer_evidence_files",
         )
@@ -856,6 +967,8 @@ if customer_intake_view == "form" and complaint_submitted:
         incident_type,
         customer_email,
         evidence_files,
+        complaint_details=complaint_details,
+        evidence_types=evidence_types,
     )
     if validation_errors:
         for validation_error in validation_errors:
@@ -882,6 +995,8 @@ if customer_intake_view == "form" and complaint_submitted:
             customer_email,
             additional_information,
             evidence_files,
+            complaint_details=complaint_details,
+            evidence_types=evidence_types,
         )
         try:
             case_creation_started = time.perf_counter()
