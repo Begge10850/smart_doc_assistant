@@ -27,6 +27,14 @@ EVIDENCE_TYPE_LABELS = {
     "delivery_status_evidence": "Evidence that carrier tracking shows delivered",
     "packing_list": "Packing list or other record of the parcel contents",
 }
+POLICY_EVIDENCE_BY_TYPE = {
+    "damage_photo": "photograph of the damaged item",
+    "packaging_photo": "photograph of the external packaging",
+    "proof_of_value": "commercial invoice or other proof of value",
+    "promised_delivery_evidence": "evidence of the promised delivery date",
+    "delivery_status_evidence": "proof of carrier delivery status",
+    "packing_list": "packing list or description of missing contents",
+}
 COMPLAINT_REQUIREMENTS = {
     "parcel_damage": {
         "required_fields": ("delivery_date", "declared_value"),

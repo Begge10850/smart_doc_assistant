@@ -188,10 +188,24 @@ def _policy_assessment(
             "then require human review. Do not approve, deny, or assign liability "
             "from the incident document alone."
         )
+    elif reported_on_time is False:
+        action = (
+            "The listed policy evidence appears complete, but the report was made "
+            "after the calculated reporting deadline. Require human review for "
+            "any applicable exception or late-filing decision; do not automatically "
+            "approve or deny the case."
+        )
+    elif reported_on_time is True:
+        action = (
+            "The listed policy evidence appears complete and the report was made "
+            "within the calculated reporting window. Proceed to human review; do "
+            "not automatically approve, deny, or assign liability."
+        )
     else:
         action = (
-            "The listed policy evidence appears complete. Require human review "
-            "before any external submission, approval, denial, or liability decision."
+            "The listed policy evidence appears complete, but reporting timeliness "
+            "could not be determined. Require human review before approval, denial, "
+            "or any liability decision."
         )
 
     return {

@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -30,6 +31,7 @@ from customer_intake import (
     COMPLAINT_REQUIREMENTS,
     CONFIGURED_CARRIER,
     EVIDENCE_TYPE_LABELS,
+    POLICY_EVIDENCE_BY_TYPE,
     IMAGE_EVIDENCE_TYPES,
     SUPPORTED_COUNTRIES,
     SUPPORTED_EVIDENCE_TYPES,
@@ -125,6 +127,12 @@ def reset_customer_form_state():
     """Clear every customer widget, including the evidence uploader."""
     for key in CUSTOMER_FORM_WIDGET_KEYS:
         st.session_state.pop(key, None)
+
+
+@st.cache_resource
+def get_customer_processing_executor():
+    """Keep customer follow-up work off the response-rendering thread."""
+    return ThreadPoolExecutor(max_workers=2)
 
 
 def start_customer_report():
@@ -334,8 +342,11 @@ def prepare_customer_case_analysis(complaint):
         f"Customer statement: {complaint['additional_information'] or 'Not supplied'}",
         "Complaint-specific facts: "
         + json.dumps(complaint.get("complaint_details", {}), sort_keys=True),
-        "Customer-labelled evidence types: "
-        + ", ".join(complaint.get("evidence_types", [])),
+        "Evidence supplied: "
+        + "; ".join(
+            POLICY_EVIDENCE_BY_TYPE.get(item, item)
+            for item in complaint.get("evidence_types", [])
+        ),
         "Evidence available:",
         *(f"- {label}" for label in evidence_labels),
         "Retrieved evidence passages:",
@@ -382,7 +393,7 @@ def complete_customer_case_processing(complaint):
             persisted_case = get_customer_case_for_handoff(
                 complaint["case_reference"]
             )
-            st.session_state.customer_case_handoff_receipt = run_customer_stage(
+            handoff_receipt = run_customer_stage(
                 complaint["case_reference"],
                 "make_handoff",
                 send_customer_case_to_make,
@@ -411,7 +422,6 @@ def complete_customer_case_processing(complaint):
                 "The Make handoff did not complete.",
             )
         else:
-            handoff_receipt = st.session_state.customer_case_handoff_receipt
             complaint["downstream_processing_status"] = "handoff_accepted"
             update_customer_case_status(
                 complaint["case_reference"], "handoff_accepted"
@@ -445,6 +455,26 @@ def complete_customer_case_processing(complaint):
         status="completed",
     )
     return complaint
+
+
+def process_customer_case_in_background(complaint):
+    """Finish evidence, analysis, and handoff after the case is acknowledged."""
+    try:
+        return complete_customer_case_processing(complaint)
+    except Exception as exc:
+        for evidence_item in complaint["evidence"]:
+            evidence_item.pop("data", None)
+        complaint["downstream_processing_status"] = "evidence_processing_failed"
+        complaint["processing_error"] = str(exc)
+        try:
+            update_customer_case_status(
+                complaint["case_reference"],
+                "evidence_processing_failed",
+                "Evidence processing did not complete.",
+            )
+        except Exception:
+            pass
+        return complaint
 
 
 def clear_document_session():
@@ -929,6 +959,11 @@ elif customer_intake_view == "update_success":
 else:
     submitted_complaint = st.session_state.get("customer_complaint")
     if submitted_complaint:
+        processing_future = st.session_state.get("customer_processing_future")
+        if processing_future is not None and processing_future.done():
+            submitted_complaint = processing_future.result()
+            st.session_state.customer_complaint = submitted_complaint
+            st.session_state.pop("customer_processing_future", None)
         st.success("Case reported successfully")
         st.markdown(
             "We have received your delivery problem. Your case reference is "
@@ -943,6 +978,11 @@ else:
                 "Your report is recorded, but evidence preparation is taking "
                 "longer than expected. Keep your case reference; the case can "
                 "still be followed up safely."
+            )
+        elif processing_future is not None and not processing_future.done():
+            st.caption(
+                "Your report is safely recorded. Evidence preparation and the "
+                "internal human-review handoff are continuing in the background."
             )
         else:
             st.caption(
@@ -1022,8 +1062,14 @@ if customer_intake_view == "form" and complaint_submitted:
             )
         else:
             st.session_state.customer_complaint = complaint
+            st.session_state.customer_processing_future = (
+                get_customer_processing_executor().submit(
+                    process_customer_case_in_background,
+                    copy.deepcopy(complaint),
+                )
+            )
             st.session_state.reset_customer_form_on_rerun = True
-            st.session_state.customer_intake_view = "processing"
+            st.session_state.customer_intake_view = "success"
             st.rerun()
 
 if customer_intake_view == "update_form" and case_update_submitted:

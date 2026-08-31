@@ -82,5 +82,26 @@ class IncidentCaseTests(unittest.TestCase):
             incident_case.missing_required_evidence,
         )
 
+    def test_complete_but_late_case_does_not_request_evidence_again(self):
+        facts = dict(FACTS)
+        facts["reported_date"] = "2026-08-20"
+        facts["evidence_supplied"] = [
+            "commercial invoice or other proof of value",
+            "photograph of the damaged item",
+            "photograph of the external packaging",
+        ]
+        incident_case = build_incident_case(
+            facts,
+            source_file="complete-late-case.pdf",
+            source_document_hash="complete-late-case",
+            policy_result=POLICY_RESULT,
+        )
+
+        self.assertEqual(incident_case.missing_required_evidence, [])
+        self.assertFalse(incident_case.reported_on_time)
+        self.assertIn("evidence appears complete", incident_case.recommended_next_action)
+        self.assertIn("after the calculated reporting deadline", incident_case.recommended_next_action)
+        self.assertNotIn("Request the missing", incident_case.recommended_next_action)
+
 if __name__ == "__main__":
     unittest.main()

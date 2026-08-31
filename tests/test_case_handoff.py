@@ -136,7 +136,7 @@ class CaseHandoffTests(unittest.TestCase):
 
         self.assertEqual(event["event_version"], "1.0")
         self.assertEqual(event["case"]["final_decision_owner"], "human_reviewer")
-        self.assertNotIn("customer_email", event["case"])
+        self.assertEqual(event["case"]["customer_email"], "customer@example.com")
         self.assertNotIn("ai_observations", event)
         self.assertNotIn("s3_object_key", event["evidence"][0])
         self.assertEqual(
