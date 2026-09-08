@@ -1008,6 +1008,11 @@ else:
                 "Your report is safely recorded. Evidence preparation and the "
                 "internal human-review handoff are continuing in the background."
             )
+            # Streamlit does not rerun automatically when a Future completes.
+            # Poll briefly so the synchronous Make response can replace this
+            # waiting state with the returned Jira ticket without user action.
+            time.sleep(2)
+            st.rerun()
         else:
             st.caption(
                 "Your original evidence is stored securely and is available for "
