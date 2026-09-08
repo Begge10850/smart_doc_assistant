@@ -235,9 +235,7 @@ def send_customer_case_to_make(customer_case, *, download_url_factory, post_requ
         "status": "accepted",
     }
 
-    jira_result = _parse_jira_result(response_text)
-    if jira_result:
-        receipt["jira_result"] = jira_result
+    receipt.update(_parse_customer_make_response(response_text))
 
     return receipt
 
@@ -348,6 +346,7 @@ def _parse_jira_result(response_text: str) -> Dict[str, Any]:
     result = {}
     for field in (
         "issue_key",
+        "issue_id",
         "title",
         "routing",
         "status",
@@ -357,6 +356,18 @@ def _parse_jira_result(response_text: str) -> Dict[str, Any]:
         value = source.get(field)
         if value is not None and str(value).strip():
             result[field] = str(value).strip()
+
+    jira_url = result.get("jira_url")
+    if jira_url:
+        parsed_url = urlparse(jira_url)
+        if parsed_url.scheme == "https" and parsed_url.netloc:
+            path_parts = [part for part in parsed_url.path.split("/") if part]
+            if not result.get("issue_key") and "browse" in path_parts:
+                browse_index = path_parts.index("browse")
+                if browse_index + 1 < len(path_parts):
+                    result["issue_key"] = path_parts[browse_index + 1]
+        else:
+            result.pop("jira_url", None)
 
     issue_key = result.get("issue_key")
     jira_url = result.get("jira_url")
@@ -373,3 +384,47 @@ def _parse_jira_result(response_text: str) -> Dict[str, Any]:
                 )
             )
     return result
+
+
+def _parse_customer_make_response(response_text: str) -> Dict[str, Any]:
+    """Return only recruiter-safe sections from the customer Make response."""
+    if not response_text:
+        return {}
+    try:
+        response_data = json.loads(response_text)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(response_data, dict):
+        return {}
+
+    parsed = {}
+    jira_result = _parse_jira_result(response_text)
+    if jira_result:
+        parsed["jira_result"] = jira_result
+
+    allowed_sections = {
+        "case_details": {
+            "case_reference", "tracking_number", "claimant_role", "carrier",
+            "country", "delivery_date", "declared_value", "complaint_type",
+            "reported_at", "customer_email", "additional_information",
+            "complaint_details", "evidence_types",
+        },
+        "saidia_analysis": {
+            "factual_summary", "policy_match_status", "policy_id",
+            "policy_title", "claim_deadline", "reported_on_time",
+            "required_evidence", "missing_required_evidence",
+            "recommended_next_action", "analysis_status",
+        },
+        "human_review": {"final_decision_owner", "message"},
+    }
+    for section_name, allowed_fields in allowed_sections.items():
+        source = response_data.get(section_name)
+        if isinstance(source, dict):
+            section = {
+                field: source[field]
+                for field in allowed_fields
+                if field in source and source[field] is not None
+            }
+            if section:
+                parsed[section_name] = section
+    return parsed

@@ -520,13 +520,42 @@ def timed_call(function, *args):
     return result, time.perf_counter() - started_at
 
 
-def render_jira_ticket(jira_result, *, fallback_action=None):
+def _display_value(value):
+    if value is None or value == "":
+        return "Not provided"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value) or "None"
+    if isinstance(value, dict):
+        return "; ".join(
+            f"{key.replace('_', ' ').title()}: {_display_value(item)}"
+            for key, item in value.items()
+        ) or "None"
+    return str(value)
+
+
+def _render_detail_table(values, fields):
+    rows = [
+        {"Field": label, "Value": _display_value(values.get(field))}
+        for field, label in fields
+        if field in values
+    ]
+    if rows:
+        st.table(rows)
+
+
+def render_jira_ticket(
+    jira_result, *, fallback_action=None, case_details=None,
+    saidia_analysis=None, human_review=None, evidence=None
+):
     """Present the allow-listed Jira result returned synchronously by Make."""
     st.markdown("**Jira ticket returned by the backend**")
     st.table([
         {"Field": label, "Value": jira_result.get(field, "Not returned")}
         for field, label in (
             ("issue_key", "Issue key"),
+            ("issue_id", "Issue ID"),
             ("title", "Title"),
             ("routing", "Routing"),
             ("status", "Status"),
@@ -537,6 +566,58 @@ def render_jira_ticket(jira_result, *, fallback_action=None):
         st.markdown(f"**Recommended action:** {recommended_action}")
     if jira_result.get("jira_url"):
         st.link_button("Open Jira ticket", jira_result["jira_url"])
+
+    if case_details:
+        st.markdown("#### Case details")
+        _render_detail_table(case_details, (
+            ("case_reference", "Case reference"),
+            ("tracking_number", "Tracking number"),
+            ("customer_email", "Customer email"),
+            ("complaint_type", "Complaint type"),
+            ("claimant_role", "Claimant role"),
+            ("carrier", "Carrier"),
+            ("country", "Country"),
+            ("reported_at", "Reported at"),
+            ("delivery_date", "Delivery date"),
+            ("declared_value", "Declared value"),
+            ("additional_information", "Additional information"),
+            ("complaint_details", "Complaint-specific details"),
+            ("evidence_types", "Evidence types"),
+        ))
+
+    if saidia_analysis:
+        st.markdown("#### Saidia grounded analysis")
+        _render_detail_table(saidia_analysis, (
+            ("factual_summary", "Factual summary"),
+            ("policy_match_status", "Policy match"),
+            ("policy_id", "Policy ID"),
+            ("policy_title", "Policy"),
+            ("claim_deadline", "Claim deadline"),
+            ("reported_on_time", "Reported on time"),
+            ("required_evidence", "Required evidence"),
+            ("missing_required_evidence", "Missing required evidence"),
+            ("recommended_next_action", "Recommended next action"),
+            ("analysis_status", "Analysis status"),
+        ))
+
+    if human_review:
+        st.markdown("#### Human review")
+        _render_detail_table(human_review, (
+            ("final_decision_owner", "Final decision owner"),
+            ("message", "Review notice"),
+        ))
+
+    evidence_rows = [
+        {
+            "File": item.get("file_name") or item.get("original_file_name"),
+            "Type": item.get("content_type") or "Unknown",
+            "Status": item.get("processing_status") or "Prepared",
+        }
+        for item in (evidence or [])
+    ]
+    if evidence_rows:
+        st.markdown(f"#### Attachments ({len(evidence_rows)})")
+        st.table(evidence_rows)
 
 
 def render_incident_case(incident_case):
@@ -1023,7 +1104,32 @@ else:
         if jira_result:
             st.divider()
             st.success("Backend workflow completed and returned a Jira ticket.")
-            render_jira_ticket(jira_result)
+            case_details = handoff_receipt.get("case_details") or {
+                field: submitted_complaint.get(field)
+                for field in (
+                    "case_reference", "tracking_number", "customer_email",
+                    "complaint_type", "claimant_role", "carrier", "country",
+                    "reported_at", "delivery_date", "declared_value",
+                    "additional_information", "complaint_details", "evidence_types",
+                )
+            }
+            saidia_analysis = handoff_receipt.get("saidia_analysis") or (
+                submitted_complaint.get("case_analysis") or {}
+            )
+            human_review = handoff_receipt.get("human_review") or {
+                "final_decision_owner": "human_reviewer",
+                "message": (
+                    "Saidia prepares and grounds the case for operational review. "
+                    "A human reviewer retains the final decision."
+                ),
+            }
+            render_jira_ticket(
+                jira_result,
+                case_details=case_details,
+                saidia_analysis=saidia_analysis,
+                human_review=human_review,
+                evidence=submitted_complaint.get("evidence"),
+            )
             st.caption(
                 f"Event ID: `{handoff_receipt['event_id']}` · "
                 f"HTTP {handoff_receipt['http_status']}"

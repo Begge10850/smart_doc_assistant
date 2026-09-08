@@ -223,7 +223,27 @@ class CaseHandoffTests(unittest.TestCase):
         self.assertEqual(receipt["jira_result"]["issue_key"], "KAN-15")
         self.assertEqual(receipt["jira_result"]["status"], "To Do")
         self.assertNotIn("internal_only", receipt["jira_result"])
-        self.assertNotIn("case_details", receipt)
+        self.assertEqual(
+            receipt["case_details"]["customer_email"],
+            "customer@example.com",
+        )
+
+    def test_jira_key_is_recovered_from_returned_browse_url(self):
+        response = json.dumps({
+            "jira_result": {
+                "title": "Review case",
+                "jira_url": "https://saidia-logistics.atlassian.net/browse/KAN-33",
+            }
+        })
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_case_to_make(
+                make_case(),
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+        self.assertEqual(receipt["jira_result"]["issue_key"], "KAN-33")
 
     def test_processed_event_contains_versioned_case_payload(self):
         event = build_handoff_event(
