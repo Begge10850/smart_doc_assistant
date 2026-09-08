@@ -545,40 +545,82 @@ def _render_detail_table(values, fields):
         st.table(rows)
 
 
-def build_policy_explanation(analysis, case_details):
-    """Explain deterministic policy results in recruiter-friendly language."""
+def build_policy_assessment(analysis, case_details):
+    """Turn deterministic policy results into an auditable employee briefing."""
     if analysis.get("policy_match_status") != "matched":
-        return (
-            "No single structured policy matched this case. It has been routed "
-            "for human review without an automated approval or denial."
-        )
+        return {
+            "classification": (
+                "No single structured policy matched this case. It requires "
+                "manual policy selection before any claim decision."
+            ),
+            "supporting_evidence": [],
+            "rules_followed": [],
+            "rules_missed": ["A single applicable policy could not be established."],
+        }
 
     policy_title = analysis.get("policy_title") or "The matched policy"
+    policy_id = analysis.get("policy_id")
     incident_type = str(case_details.get("complaint_type") or "delivery issue").replace(
         "_", " "
     )
-    carrier = case_details.get("carrier") or "the configured carrier"
     country = case_details.get("country") or "the reported destination"
-    explanation = (
-        f"{policy_title} applies because this is a {incident_type} case for "
-        f"{carrier} in {country}."
+    classification = (
+        f"The applicable internal policy is {policy_title}"
+        + (f" ({policy_id})" if policy_id else "")
+        + f" because the complaint category is {incident_type} and the case "
+        f"was reported for {country}, both of which are within this policy's scope."
     )
 
+    required = list(analysis.get("required_evidence") or [])
+    missing = list(analysis.get("missing_required_evidence") or [])
+    normalized_missing = {str(item).strip().casefold() for item in missing}
+    supporting_evidence = [
+        item for item in required
+        if str(item).strip().casefold() not in normalized_missing
+    ]
+
+    rules_followed = [
+        f"Country scope matched: {country}.",
+        f"Claim category matched: {incident_type}.",
+    ]
+    rules_missed = []
     deadline = analysis.get("claim_deadline")
     reported_on_time = analysis.get("reported_on_time")
     if deadline and reported_on_time is True:
-        explanation += f" The report was received within the {deadline} deadline."
+        rules_followed.append(
+            f"Reporting-time rule satisfied: the claim was received by {deadline}."
+        )
     elif deadline and reported_on_time is False:
-        explanation += f" The report was received after the {deadline} deadline."
+        rules_missed.append(
+            f"Reporting-time rule missed: the claim was received after {deadline}."
+        )
     elif deadline:
-        explanation += f" The calculated reporting deadline is {deadline}."
-
-    missing = analysis.get("missing_required_evidence") or []
-    if missing:
-        explanation += " The policy evidence check still requires: " + _display_value(missing) + "."
+        rules_missed.append(
+            f"Reporting compliance is unresolved; the calculated deadline is {deadline}."
+        )
     else:
-        explanation += " No required policy evidence is currently marked as missing."
-    return explanation
+        rules_missed.append("The reporting deadline could not be calculated.")
+
+    if missing:
+        rules_missed.extend(
+            f"Required evidence missing: {item}." for item in missing
+        )
+    else:
+        rules_followed.append("All listed policy evidence requirements are satisfied.")
+
+    return {
+        "classification": classification,
+        "supporting_evidence": supporting_evidence,
+        "rules_followed": rules_followed,
+        "rules_missed": rules_missed,
+    }
+
+
+def _render_bullets(items, *, empty_message):
+    if items:
+        st.markdown("\n".join(f"- {item}" for item in items))
+    else:
+        st.caption(empty_message)
 
 
 def render_jira_ticket(
@@ -621,36 +663,38 @@ def render_jira_ticket(
             st.markdown("**Factual summary**")
             st.write(saidia_analysis["factual_summary"])
 
+        assessment = build_policy_assessment(saidia_analysis, case_details or {})
         if saidia_analysis.get("policy_match_status") == "matched":
-            st.success(
-                "Matched policy: "
-                + saidia_analysis.get("policy_title", "Named policy unavailable")
-            )
-            if saidia_analysis.get("policy_id"):
-                st.caption(f"Policy ID: `{saidia_analysis['policy_id']}`")
+            st.success("Policy match established")
         else:
-            st.warning(
-                "Policy match: "
-                + _display_value(saidia_analysis.get("policy_match_status"))
-            )
+            st.warning("A single policy match was not established")
 
-        st.markdown("**Why this policy applies**")
-        st.write(
-            saidia_analysis.get("policy_explanation")
-            or build_policy_explanation(saidia_analysis, case_details or {})
+        st.markdown("**Applicable NorthStar policy—and why**")
+        st.write(assessment["classification"])
+
+        st.markdown("**Evidence that satisfied the policy requirements**")
+        _render_bullets(
+            assessment["supporting_evidence"],
+            empty_message="No required evidence has yet been confirmed as satisfied.",
         )
-        _render_detail_table(saidia_analysis, (
-            ("claim_deadline", "Claim deadline"),
-            ("reported_on_time", "Reported within deadline"),
-            ("required_evidence", "Required evidence"),
-            ("missing_required_evidence", "Missing required evidence"),
-        ))
+
+        st.markdown("**Policy rules followed**")
+        _render_bullets(
+            assessment["rules_followed"],
+            empty_message="No policy rules have yet been confirmed as satisfied.",
+        )
+
+        st.markdown("**Policy rules missed or unresolved**")
+        _render_bullets(
+            assessment["rules_missed"],
+            empty_message="No policy rules are currently identified as missed.",
+        )
 
         recommended_action = (
             saidia_analysis.get("recommended_next_action") or fallback_action
         )
         if recommended_action:
-            st.markdown("**Policy-based recommended next action**")
+            st.markdown("**Recommendation for the reviewing employee**")
             st.info(recommended_action)
         if saidia_analysis.get("analysis_status"):
             st.caption(
