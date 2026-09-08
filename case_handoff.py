@@ -13,7 +13,8 @@ from incident_case import IncidentCase
 
 HANDOFF_EVENT_TYPE = "saidia.case.processed"
 HANDOFF_EVENT_VERSION = "2.0"
-HANDOFF_TIMEOUT_SECONDS = 15
+HANDOFF_TIMEOUT_SECONDS = 60
+MAX_WEBHOOK_RESPONSE_BYTES = 64 * 1024
 CUSTOMER_HANDOFF_EVENT_TYPE = "saidia.customer_case.ready_for_human_review"
 CUSTOMER_HANDOFF_EVENT_VERSION = "1.0"
 CUSTOMER_UPDATE_EVENT_TYPE = "saidia.customer_case.updated"
@@ -34,7 +35,13 @@ def _post_json(url, *, event, headers, timeout):
     )
     with urlopen(request, timeout=timeout) as response:
         status_code = getattr(response, "status", response.getcode())
-        response_text = response.read(4096).decode("utf-8", errors="replace")
+        response_body = response.read(MAX_WEBHOOK_RESPONSE_BYTES + 1)
+        if len(response_body) > MAX_WEBHOOK_RESPONSE_BYTES:
+            raise CaseHandoffError(
+                "Make returned more than 64 KB. Reduce the Webhook Response "
+                "body to the recruiter-facing case fields."
+            )
+        response_text = response_body.decode("utf-8", errors="replace")
     return status_code, response_text
 
 

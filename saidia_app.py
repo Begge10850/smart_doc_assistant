@@ -620,6 +620,34 @@ def render_jira_ticket(
         st.table(evidence_rows)
 
 
+@st.fragment(run_every=2)
+def render_customer_processing_wait():
+    """Refresh only the waiting panel until background processing completes."""
+    processing_future = st.session_state.get("customer_processing_future")
+    if processing_future is None:
+        st.rerun()
+    if processing_future.done():
+        try:
+            submitted_complaint = processing_future.result()
+        except Exception:
+            submitted_complaint = st.session_state.get("customer_complaint", {})
+            submitted_complaint["downstream_processing_status"] = (
+                "evidence_processing_failed"
+            )
+        st.session_state.customer_complaint = submitted_complaint
+        st.session_state.pop("customer_processing_future", None)
+        st.rerun()
+
+    with st.status("Preparing your case for human review…", expanded=True):
+        st.write("Securing and preparing the supplied evidence")
+        st.write("Applying the structured carrier policy")
+        st.write("Waiting for Make and Jira to return the completed ticket")
+    st.caption(
+        "You can keep this page open. Only this status panel refreshes while "
+        "the form stays hidden."
+    )
+
+
 def render_incident_case(incident_case):
     """Lead with the workflow result and keep detailed analysis available."""
 
@@ -1085,15 +1113,7 @@ else:
                 "still be followed up safely."
             )
         elif processing_future is not None and not processing_future.done():
-            st.caption(
-                "Your report is safely recorded. Evidence preparation and the "
-                "internal human-review handoff are continuing in the background."
-            )
-            # Streamlit does not rerun automatically when a Future completes.
-            # Poll briefly so the synchronous Make response can replace this
-            # waiting state with the returned Jira ticket without user action.
-            time.sleep(2)
-            st.rerun()
+            render_customer_processing_wait()
         else:
             st.caption(
                 "Your original evidence is stored securely and is available for "

@@ -287,7 +287,7 @@ class CaseHandoffTests(unittest.TestCase):
             captured_request["headers"]["Idempotency-Key"],
             "handoff-case-f717c1c08bbc2d65",
         )
-        self.assertEqual(captured_request["timeout"], 15)
+        self.assertEqual(captured_request["timeout"], 60)
 
     def test_json_response_returns_recruiter_safe_jira_result(self):
         response = json.dumps({
