@@ -420,7 +420,8 @@ def _parse_customer_make_response(response_text: str) -> Dict[str, Any]:
             "factual_summary", "policy_match_status", "policy_explanation", "policy_id",
             "policy_title", "claim_deadline", "reported_on_time",
             "required_evidence", "missing_required_evidence",
-            "recommended_next_action", "analysis_status",
+            "recommended_next_action", "analysis_status", "policy_effective_date",
+            "reporting_window_days", "deadline_basis", "handling_guidance",
         },
         "human_review": {"final_decision_owner", "message"},
     }
@@ -430,7 +431,9 @@ def _parse_customer_make_response(response_text: str) -> Dict[str, Any]:
             section = {
                 field: source[field]
                 for field in allowed_fields
-                if field in source and source[field] is not None
+                if field in source
+                and source[field] is not None
+                and not (isinstance(source[field], str) and not source[field].strip())
             }
             if section:
                 parsed[section_name] = section

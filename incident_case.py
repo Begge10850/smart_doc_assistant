@@ -1,5 +1,5 @@
 import hashlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +40,10 @@ class IncidentCase:
     required_evidence: List[str]
     missing_required_evidence: List[str]
     recommended_next_action: str
+    policy_effective_date: Optional[str] = None
+    reporting_window_days: Optional[int] = None
+    deadline_basis: Optional[str] = None
+    handling_guidance: List[str] = field(default_factory=list)
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -162,6 +166,10 @@ def _policy_assessment(
                 "No single matching evaluation policy was found. Route the case "
                 "for human review without making a compliance or liability decision."
             ),
+            "policy_effective_date": None,
+            "reporting_window_days": None,
+            "deadline_basis": None,
+            "handling_guidance": [],
         }
 
     required_evidence = list(policy.get("required_evidence", []))
@@ -218,6 +226,10 @@ def _policy_assessment(
         "required_evidence": required_evidence,
         "missing_required_evidence": missing_evidence,
         "recommended_next_action": action,
+        "policy_effective_date": _clean_optional(policy.get("effective_date")),
+        "reporting_window_days": reporting_window,
+        "deadline_basis": _clean_optional(policy.get("deadline_basis")),
+        "handling_guidance": list(policy.get("handling_guidance", [])),
     }
 
 

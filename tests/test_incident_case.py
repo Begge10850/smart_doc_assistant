@@ -26,7 +26,10 @@ POLICY_RESULT = {
         {
             "policy_id": "northstar-parcel-damage-eu-v1",
             "title": "NorthStar Parcel EU Damage Claim Policy",
+            "effective_date": "2026-01-01",
             "reporting_window_days": 7,
+            "deadline_basis": "calendar days after delivery",
+            "handling_guidance": ["Require human review."],
             "required_evidence": [
                 "tracking number",
                 "delivery date",
@@ -57,6 +60,13 @@ class IncidentCaseTests(unittest.TestCase):
         )
 
         self.assertEqual(incident_case.claim_deadline, "2026-08-16")
+        self.assertEqual(incident_case.policy_effective_date, "2026-01-01")
+        self.assertEqual(incident_case.reporting_window_days, 7)
+        self.assertEqual(
+            incident_case.deadline_basis,
+            "calendar days after delivery",
+        )
+        self.assertEqual(incident_case.handling_guidance, ["Require human review."])
         self.assertTrue(incident_case.reported_on_time)
         self.assertEqual(
             incident_case.missing_required_evidence,

@@ -567,9 +567,18 @@ def build_policy_assessment(analysis, case_details):
     classification = (
         f"The applicable internal policy is {policy_title}"
         + (f" ({policy_id})" if policy_id else "")
-        + f" because the complaint category is {incident_type} and the case "
-        f"was reported for {country}, both of which are within this policy's scope."
+        + f". It is the NorthStar rule set for {incident_type} claims in {country}."
     )
+    effective_date = analysis.get("policy_effective_date")
+    reporting_window = analysis.get("reporting_window_days")
+    deadline_basis = analysis.get("deadline_basis")
+    if effective_date:
+        classification += f" This policy version is effective from {effective_date}."
+    if reporting_window is not None and deadline_basis:
+        classification += (
+            f" Its filing rule allows {reporting_window} days, measured as "
+            f"{deadline_basis}."
+        )
 
     required = list(analysis.get("required_evidence") or [])
     missing = list(analysis.get("missing_required_evidence") or [])
@@ -689,6 +698,11 @@ def render_jira_ticket(
             assessment["rules_missed"],
             empty_message="No policy rules are currently identified as missed.",
         )
+
+        handling_guidance = saidia_analysis.get("handling_guidance") or []
+        if handling_guidance:
+            st.markdown("**Policy guidance for the reviewing employee**")
+            _render_bullets(handling_guidance, empty_message="")
 
         recommended_action = (
             saidia_analysis.get("recommended_next_action") or fallback_action
@@ -1234,9 +1248,10 @@ else:
                     "additional_information", "complaint_details", "evidence_types",
                 )
             }
-            saidia_analysis = handoff_receipt.get("saidia_analysis") or (
-                submitted_complaint.get("case_analysis") or {}
-            )
+            saidia_analysis = {
+                **(submitted_complaint.get("case_analysis") or {}),
+                **(handoff_receipt.get("saidia_analysis") or {}),
+            }
             human_review = handoff_receipt.get("human_review") or {
                 "final_decision_owner": "human_reviewer",
                 "message": (
@@ -1263,12 +1278,15 @@ else:
                 "Make accepted the case, but its webhook response did not include "
                 "a Jira issue key. Check the final Webhook Response module mapping."
             )
-        st.button(
-            "Return to case options",
-            type="primary",
-            use_container_width=True,
-            on_click=lambda: st.session_state.update(customer_intake_view="landing"),
-        )
+        if processing_future is None or processing_future.done():
+            st.button(
+                "Return to case options",
+                type="primary",
+                use_container_width=True,
+                on_click=lambda: st.session_state.update(
+                    customer_intake_view="landing"
+                ),
+            )
     else:
         st.session_state.customer_intake_view = "landing"
         st.rerun()
