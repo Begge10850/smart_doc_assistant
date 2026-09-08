@@ -545,6 +545,42 @@ def _render_detail_table(values, fields):
         st.table(rows)
 
 
+def build_policy_explanation(analysis, case_details):
+    """Explain deterministic policy results in recruiter-friendly language."""
+    if analysis.get("policy_match_status") != "matched":
+        return (
+            "No single structured policy matched this case. It has been routed "
+            "for human review without an automated approval or denial."
+        )
+
+    policy_title = analysis.get("policy_title") or "The matched policy"
+    incident_type = str(case_details.get("complaint_type") or "delivery issue").replace(
+        "_", " "
+    )
+    carrier = case_details.get("carrier") or "the configured carrier"
+    country = case_details.get("country") or "the reported destination"
+    explanation = (
+        f"{policy_title} applies because this is a {incident_type} case for "
+        f"{carrier} in {country}."
+    )
+
+    deadline = analysis.get("claim_deadline")
+    reported_on_time = analysis.get("reported_on_time")
+    if deadline and reported_on_time is True:
+        explanation += f" The report was received within the {deadline} deadline."
+    elif deadline and reported_on_time is False:
+        explanation += f" The report was received after the {deadline} deadline."
+    elif deadline:
+        explanation += f" The calculated reporting deadline is {deadline}."
+
+    missing = analysis.get("missing_required_evidence") or []
+    if missing:
+        explanation += " The policy evidence check still requires: " + _display_value(missing) + "."
+    else:
+        explanation += " No required policy evidence is currently marked as missing."
+    return explanation
+
+
 def render_jira_ticket(
     jira_result, *, fallback_action=None, case_details=None,
     saidia_analysis=None, human_review=None, evidence=None
@@ -561,12 +597,6 @@ def render_jira_ticket(
             ("status", "Status"),
         )
     ])
-    recommended_action = jira_result.get("recommended_action") or fallback_action
-    if recommended_action:
-        st.markdown(f"**Recommended action:** {recommended_action}")
-    if jira_result.get("jira_url"):
-        st.link_button("Open Jira ticket", jira_result["jira_url"])
-
     if case_details:
         st.markdown("#### Case details")
         _render_detail_table(case_details, (
@@ -587,18 +617,45 @@ def render_jira_ticket(
 
     if saidia_analysis:
         st.markdown("#### Saidia grounded analysis")
+        if saidia_analysis.get("factual_summary"):
+            st.markdown("**Factual summary**")
+            st.write(saidia_analysis["factual_summary"])
+
+        if saidia_analysis.get("policy_match_status") == "matched":
+            st.success(
+                "Matched policy: "
+                + saidia_analysis.get("policy_title", "Named policy unavailable")
+            )
+            if saidia_analysis.get("policy_id"):
+                st.caption(f"Policy ID: `{saidia_analysis['policy_id']}`")
+        else:
+            st.warning(
+                "Policy match: "
+                + _display_value(saidia_analysis.get("policy_match_status"))
+            )
+
+        st.markdown("**Why this policy applies**")
+        st.write(
+            saidia_analysis.get("policy_explanation")
+            or build_policy_explanation(saidia_analysis, case_details or {})
+        )
         _render_detail_table(saidia_analysis, (
-            ("factual_summary", "Factual summary"),
-            ("policy_match_status", "Policy match"),
-            ("policy_id", "Policy ID"),
-            ("policy_title", "Policy"),
             ("claim_deadline", "Claim deadline"),
-            ("reported_on_time", "Reported on time"),
+            ("reported_on_time", "Reported within deadline"),
             ("required_evidence", "Required evidence"),
             ("missing_required_evidence", "Missing required evidence"),
-            ("recommended_next_action", "Recommended next action"),
-            ("analysis_status", "Analysis status"),
         ))
+
+        recommended_action = (
+            saidia_analysis.get("recommended_next_action") or fallback_action
+        )
+        if recommended_action:
+            st.markdown("**Policy-based recommended next action**")
+            st.info(recommended_action)
+        if saidia_analysis.get("analysis_status"):
+            st.caption(
+                "Analysis status: " + _display_value(saidia_analysis["analysis_status"])
+            )
 
     if human_review:
         st.markdown("#### Human review")

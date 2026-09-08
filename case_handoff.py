@@ -417,7 +417,7 @@ def _parse_customer_make_response(response_text: str) -> Dict[str, Any]:
             "complaint_details", "evidence_types",
         },
         "saidia_analysis": {
-            "factual_summary", "policy_match_status", "policy_id",
+            "factual_summary", "policy_match_status", "policy_explanation", "policy_id",
             "policy_title", "claim_deadline", "reported_on_time",
             "required_evidence", "missing_required_evidence",
             "recommended_next_action", "analysis_status",
