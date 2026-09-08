@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pgvector import Vector
 
 from pgvector.psycopg import register_vector
+from embedding_config import validate_embedding_dimension
 
 
 load_dotenv()
@@ -577,6 +578,8 @@ def save_document_chunks(
         raise ValueError(
             "The number of chunks must match the number of embeddings."
         )
+    for embedding in embeddings:
+        validate_embedding_dimension(embedding)
 
     database_url = get_database_url()
 
@@ -623,7 +626,6 @@ def save_document_chunks(
                         "embedding_model": embedding_model,
                     },
                 )
-
         connection.commit()
 
 
@@ -655,6 +657,7 @@ def search_document_chunks(
 ):
     """Return the document chunks most semantically similar to a query."""
 
+    validate_embedding_dimension(query_embedding)
     database_url = get_database_url()
 
     query = """
@@ -699,6 +702,8 @@ def save_policy_chunks(
         raise ValueError(
             "The number of chunks must match the number of embeddings."
         )
+    for embedding in embeddings:
+        validate_embedding_dimension(embedding)
 
     database_url = get_database_url()
 
@@ -745,6 +750,13 @@ def save_policy_chunks(
                         "embedding_model": embedding_model,
                     },
                 )
+            cursor.execute(
+                """
+                delete from policy_chunks
+                where policy_id = %s and chunk_index >= %s;
+                """,
+                (policy_id, len(chunks)),
+            )
 
         connection.commit()
 
@@ -777,6 +789,7 @@ def search_policy_chunks(
 ):
     """Return the policy chunks most semantically similar to a query."""
 
+    validate_embedding_dimension(query_embedding)
     database_url = get_database_url()
 
     query = """

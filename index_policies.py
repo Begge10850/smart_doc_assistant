@@ -1,14 +1,11 @@
 from database import (
     get_database_url,
-    policy_has_embeddings,
     save_policy_chunks,
 )
 from vector_store import chunk_text, embed_chunks
+from embedding_config import EMBEDDING_MODEL
 
 import psycopg
-
-
-EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 
 def load_policies():
@@ -29,11 +26,7 @@ def load_policies():
 
 
 def index_policy(policy_db_id, policy_code, title, policy_text):
-    """Chunk, embed, and save one policy if it is not already indexed."""
-
-    if policy_has_embeddings(policy_db_id):
-        print(f"Skipping {policy_code}: embeddings already exist.")
-        return
+    """Chunk, embed, and refresh one policy's semantic support index."""
 
     chunks = chunk_text(policy_text)
 

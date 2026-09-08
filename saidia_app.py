@@ -47,6 +47,7 @@ from s3_upload import (
     upload_evidence_to_s3,
     upload_to_s3,
 )
+from embedding_config import EMBEDDING_MODEL
 from vector_store import chunk_text, embed_chunks
 from database import (
     create_customer_case_update,
@@ -271,7 +272,7 @@ def process_customer_evidence(complaint):
                 "document_id": document_id,
                 "chunks": chunks,
                 "embeddings": embeddings,
-                "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+                "embedding_model": EMBEDDING_MODEL,
             },
         )
         item.update({
@@ -430,6 +431,7 @@ def complete_customer_case_processing(complaint):
                 "The Make handoff did not complete.",
             )
         else:
+            complaint["handoff_receipt"] = handoff_receipt
             complaint["downstream_processing_status"] = "handoff_accepted"
             update_customer_case_status(
                 complaint["case_reference"], "handoff_accepted"
@@ -518,6 +520,25 @@ def timed_call(function, *args):
     return result, time.perf_counter() - started_at
 
 
+def render_jira_ticket(jira_result, *, fallback_action=None):
+    """Present the allow-listed Jira result returned synchronously by Make."""
+    st.markdown("**Jira ticket returned by the backend**")
+    st.table([
+        {"Field": label, "Value": jira_result.get(field, "Not returned")}
+        for field, label in (
+            ("issue_key", "Issue key"),
+            ("title", "Title"),
+            ("routing", "Routing"),
+            ("status", "Status"),
+        )
+    ])
+    recommended_action = jira_result.get("recommended_action") or fallback_action
+    if recommended_action:
+        st.markdown(f"**Recommended action:** {recommended_action}")
+    if jira_result.get("jira_url"):
+        st.link_button("Open Jira ticket", jira_result["jira_url"])
+
+
 def render_incident_case(incident_case):
     """Lead with the workflow result and keep detailed analysis available."""
 
@@ -526,25 +547,10 @@ def render_incident_case(incident_case):
         st.success("The incident was routed to the operational workflow.")
         jira_result = handoff_receipt.get("jira_result", {})
         if jira_result:
-            st.markdown("**Jira ticket**")
-            st.table([
-                {"Field": label, "Value": jira_result.get(field, "Not returned")}
-                for field, label in (
-                    ("issue_key", "Issue key"),
-                    ("title", "Title"),
-                    ("routing", "Routing"),
-                    ("status", "Status"),
-                )
-            ])
-            st.markdown(
-                "**Recommended action:** "
-                + jira_result.get(
-                    "recommended_action",
-                    incident_case.recommended_next_action,
-                )
+            render_jira_ticket(
+                jira_result,
+                fallback_action=incident_case.recommended_next_action,
             )
-            if jira_result.get("jira_url"):
-                st.link_button("Open Jira ticket", jira_result["jira_url"])
         else:
             st.info(
                 "The case was handed off successfully, but Make did not return "
@@ -1006,6 +1012,24 @@ else:
             st.caption(
                 "Your original evidence is stored securely and is available for "
                 "human review."
+            )
+        handoff_receipt = submitted_complaint.get("handoff_receipt", {})
+        jira_result = handoff_receipt.get("jira_result", {})
+        if jira_result:
+            st.divider()
+            st.success("Backend workflow completed and returned a Jira ticket.")
+            render_jira_ticket(jira_result)
+            st.caption(
+                f"Event ID: `{handoff_receipt['event_id']}` · "
+                f"HTTP {handoff_receipt['http_status']}"
+            )
+        elif (
+            submitted_complaint.get("downstream_processing_status")
+            == "handoff_accepted"
+        ):
+            st.info(
+                "Make accepted the case, but its webhook response did not include "
+                "a Jira issue key. Check the final Webhook Response module mapping."
             )
         st.button(
             "Return to case options",
@@ -1506,7 +1530,7 @@ if st.session_state.get("processed_doc_hash"):
                             document_id=st.session_state.document_id,
                             chunks=chunks,
                             embeddings=embeddings,
-                            embedding_model="sentence-transformers/all-mpnet-base-v2",
+                            embedding_model=EMBEDDING_MODEL,
                         )
 
                         st.session_state.setdefault("processing_timings", {})[

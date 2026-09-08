@@ -8,6 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+_ORIGINAL_MODULES = {
+    name: sys.modules.get(name)
+    for name in ("openai", "qa_engine", "database", "policy_store")
+}
+
 fake_openai = types.ModuleType("openai")
 fake_openai.OpenAI = object
 sys.modules["openai"] = fake_openai
@@ -29,6 +34,14 @@ SPEC = importlib.util.spec_from_file_location(
 )
 agent_engine = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(agent_engine)
+
+# The fakes belong only to agent_engine_under_test. Restore global imports so
+# collection order cannot make unrelated tests use a fake database.
+for module_name, original_module in _ORIGINAL_MODULES.items():
+    if original_module is None:
+        sys.modules.pop(module_name, None)
+    else:
+        sys.modules[module_name] = original_module
 
 
 class ToolSchemaTests(unittest.TestCase):

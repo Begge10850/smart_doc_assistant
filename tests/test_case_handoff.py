@@ -183,6 +183,48 @@ class CaseHandoffTests(unittest.TestCase):
             "customer-handoff-CASE-20260826-ABC123",
         )
 
+    def test_customer_handoff_returns_allow_listed_jira_ticket(self):
+        customer_case = {
+            "case_reference": "CASE-20260826-ABC123",
+            "reported_at": "2026-08-26T10:00:00+00:00",
+            "status": "submitted",
+            "claimant_role": "recipient",
+            "tracking_number": "TRACK-123",
+            "complaint_type": "late_delivery",
+            "customer_email": "customer@example.com",
+            "additional_information": "Late.",
+            "downstream_processing_status": "evidence_processed",
+            "evidence": [],
+        }
+        response = json.dumps({
+            "status": "accepted",
+            "jira_result": {
+                "issue_key": "KAN-15",
+                "title": "Review CASE-20260826-ABC123",
+                "routing": "Saidia Logistics / Human review",
+                "status": "To Do",
+                "recommended_action": "Human review required",
+                "jira_url": "https://saidia-logistics.atlassian.net/browse/KAN-15",
+                "internal_only": "must not reach Streamlit",
+            },
+            "case_details": {"customer_email": "customer@example.com"},
+        })
+
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_customer_case_to_make(
+                customer_case,
+                download_url_factory=lambda _key: "https://signed.example/evidence",
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+
+        self.assertEqual(receipt["jira_result"]["issue_key"], "KAN-15")
+        self.assertEqual(receipt["jira_result"]["status"], "To Do")
+        self.assertNotIn("internal_only", receipt["jira_result"])
+        self.assertNotIn("case_details", receipt)
+
     def test_processed_event_contains_versioned_case_payload(self):
         event = build_handoff_event(
             make_case(),

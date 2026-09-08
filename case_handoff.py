@@ -225,6 +225,8 @@ def send_customer_case_to_make(customer_case, *, download_url_factory, post_requ
         raise CaseHandoffError(
             f"Make rejected the customer case with HTTP status {response_status}."
         )
+    response_text = str(response_text or "").strip()
+
     receipt = {
         "case_reference": customer_case["case_reference"],
         "event_id": event["event_id"],
@@ -232,9 +234,11 @@ def send_customer_case_to_make(customer_case, *, download_url_factory, post_requ
         "http_status": response_status,
         "status": "accepted",
     }
-    jira_result = _parse_jira_result(str(response_text or "").strip())
+
+    jira_result = _parse_jira_result(response_text)
     if jira_result:
         receipt["jira_result"] = jira_result
+
     return receipt
 
 

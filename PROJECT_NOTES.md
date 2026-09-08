@@ -1,5 +1,36 @@
 # Saidia Project Notes
 
+## MVP release state (2026-09-08)
+
+Release architecture:
+
+`validated intake -> private case-scoped S3 evidence -> PostgreSQL metadata/text
+-> 768d pgvector retrieval -> deterministic structured policy assessment ->
+human review via idempotent Make/Jira handoff`
+
+Hard boundaries:
+
+- `carrier_policies` structured fields are authoritative for exact carrier,
+  country, incident-type, evidence, and deadline logic.
+- `policy_chunks` is semantic support for retrieval/explanation only.
+- Original customer photographs are not interpreted automatically.
+- Saidia prepares and routes cases; a human reviewer makes the final decision.
+- Make responses are reduced to allow-listed Jira display fields before use.
+
+Release verification:
+
+- Apply `migrations/000_core_schema.sql` through
+  `migrations/007_policy_chunks.sql` in filename order for a fresh database.
+- The configured embedding model is
+  `sentence-transformers/all-mpnet-base-v2` (`vector(768)`).
+- Run `python index_policies.py` after policy changes; indexing refreshes stale
+  chunks and removes obsolete trailing chunks transactionally.
+- Run `python -m pytest -q` before deployment.
+
+Known external prerequisites are private S3, PostgreSQL, OpenAI, and the mapped
+Make/Jira scenario. They must be verified with non-sensitive demo data in the
+deployment environment. Do not commit `.env` or Streamlit secrets.
+
 ## Deferred: employee Jira operations dashboard
 
 Implement this only after the customer-case Make route is configured and Jira

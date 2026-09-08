@@ -120,16 +120,31 @@ implemented and tested.
 ## Database
 - DATABASE_URL = "postgresql://..." # hosted PostgreSQL connection string; keep private
 
-Before deploying the customer complaint lifecycle, apply migrations in filename
-order to the same PostgreSQL database:
+Use Python 3.10 or newer. Create an isolated environment, install dependencies,
+then apply every SQL file in `migrations/` in filename order to the same database.
+The complete order is:
 
 ```text
+migrations/000_core_schema.sql
 migrations/001_customer_cases.sql
 migrations/002_case_processing_metrics.sql
 migrations/003_northstar_complaint_policies.sql
 migrations/004_customer_case_schema_cleanup.sql
 migrations/005_customer_case_updates.sql
+migrations/006_complaint_specific_intake.sql
+migrations/007_policy_chunks.sql
 ```
+
+Then refresh the semantic policy index and start the app:
+
+```bash
+python index_policies.py
+streamlit run saidia_app.py
+```
+
+`all-mpnet-base-v2` produces 768-dimensional embeddings. Both
+`document_chunks.embedding` and `policy_chunks.embedding` are therefore
+`vector(768)`; application writes and searches reject any other dimension.
 
 These create durable customer-case, evidence, grounded-analysis, lifecycle,
 processing-metric, and fictional NorthStar policy records. Original file bodies remain in private S3;
@@ -150,9 +165,39 @@ case update is designed to become a comment/attachment update on the original
 Jira issue rather than a second Jira ticket.
 
 After applying migration 003, run `python index_policies.py` once in the project
-environment. This chunks and embeds the five policy texts so semantic policy
-retrieval can find them. Structured policy matching remains deterministic by
-carrier, country, and complaint type.
+environment, and repeat it whenever policy text changes. It refreshes policy
+chunks so semantic retrieval can support explanations. Structured fields in
+`carrier_policies` remain authoritative: matching is deterministic by explicit
+carrier (including an allow-listed alias), country, and complaint type, and
+deadline/evidence calculations never depend on vector similarity.
+
+## MVP architecture and demo
+
+Customer intake validates complaint-specific facts and blocks duplicate active
+cases. Original evidence is uploaded under a private, case-scoped S3 key; only
+metadata and object keys are stored in PostgreSQL. Text documents are extracted,
+persisted, and embedded lazily for grounded Q&A, while photographs remain
+unchanged for human inspection. Saidia prepares a non-binding analysis from
+structured policies, then sends an idempotent event and short-lived evidence
+links to Make for Jira. Jira/human review owns the final decision.
+
+Demo checklist:
+
+1. Submit a supported NorthStar complaint with required fields and evidence.
+2. Confirm a case reference and private evidence processing status appear.
+3. Confirm structured policy guidance, missing evidence, and timing are shown as
+   preparation—not approval or denial.
+4. Confirm Make returns an accepted receipt and, when configured, an allow-listed
+   Jira result with an issue key/link.
+5. Ask a question about an uploaded text document to trigger grounded vector Q&A.
+6. Resubmit the same active tracking-number/problem and confirm it is treated as
+   a duplicate; add information using the existing case reference and confirm the
+   original Jira issue is targeted.
+
+Known MVP limitations: the carrier policies are fictional; only NorthStar is
+exposed in customer intake; external S3/OpenAI/Make/Jira behavior requires valid
+private credentials and a mapped Make scenario; there is no employee dashboard;
+and automated tests mock external writes rather than creating real Jira issues.
 
 Example performance query:
 

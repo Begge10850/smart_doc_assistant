@@ -1,6 +1,12 @@
 from database import find_carrier_policies
 
 
+# Explicit aliases only: policy selection must never depend on fuzzy similarity.
+CARRIER_ALIASES = {
+    "northstar parcel co.": "NorthStar Parcel",
+}
+
+
 class PolicyStoreError(RuntimeError):
     """Raised when the PostgreSQL policy store cannot be read."""
 
@@ -8,9 +14,14 @@ class PolicyStoreError(RuntimeError):
 def search_carrier_policies(carrier, country, incident_type):
     """Return policies matching explicit incident facts supplied by the agent."""
 
+    canonical_carrier = CARRIER_ALIASES.get(
+        str(carrier or "").strip().casefold(),
+        carrier,
+    )
+
     try:
         rows = find_carrier_policies(
-            carrier=carrier,
+            carrier=canonical_carrier,
             country=country,
             incident_type=incident_type,
         )
