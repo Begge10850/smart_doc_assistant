@@ -192,22 +192,21 @@ def _policy_assessment(
 
     if missing_evidence:
         action = (
-            "Request the missing required evidence before external submission, "
-            "then require human review. Do not approve, deny, or assign liability "
-            "from the incident document alone."
+            "Request the missing required evidence before completing the claim "
+            "review. The reviewer should also check filing timeliness and any "
+            "documented exception before deciding the next operational step."
         )
     elif reported_on_time is False:
         action = (
             "The listed policy evidence appears complete, but the report was made "
-            "after the calculated reporting deadline. Require human review for "
-            "any applicable exception or late-filing decision; do not automatically "
-            "approve or deny the case."
+            "after the calculated reporting deadline. Check whether a documented "
+            "late-filing exception applies before completing the claim review."
         )
     elif reported_on_time is True:
         action = (
             "The listed policy evidence appears complete and the report was made "
-            "within the calculated reporting window. Proceed to human review; do "
-            "not automatically approve, deny, or assign liability."
+            "within the calculated reporting window. Review the supplied evidence "
+            "and any applicable exclusions before selecting the next operational step."
         )
     else:
         action = (

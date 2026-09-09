@@ -614,10 +614,28 @@ def build_policy_assessment(analysis, case_details):
 
     deadline = analysis.get("claim_deadline")
     reported_on_time = analysis.get("reported_on_time")
+    if isinstance(reported_on_time, str):
+        normalized = reported_on_time.strip().lower()
+        reported_on_time = (
+            True if normalized == "true" else False if normalized == "false" else None
+        )
+    days_late = None
+    try:
+        reported_date = datetime.fromisoformat(
+            str(case_details.get("reported_at", ""))[:10]
+        ).date()
+        deadline_date = datetime.fromisoformat(str(deadline)).date()
+        days_late = max((reported_date - deadline_date).days, 0)
+    except (TypeError, ValueError):
+        pass
     if deadline and reported_on_time is True:
         filing = f"Met — filed by the {deadline} deadline"
     elif deadline and reported_on_time is False:
-        filing = f"Missed — filed after the {deadline} deadline"
+        filing = (
+            f"Missed — filed {days_late} day(s) after the {deadline} deadline"
+            if days_late is not None
+            else f"Missed — filed after the {deadline} deadline"
+        )
     elif deadline:
         filing = f"Unresolved — deadline calculated as {deadline}"
     else:
@@ -1263,8 +1281,10 @@ else:
                 )
             }
             saidia_analysis = {
-                **(submitted_complaint.get("case_analysis") or {}),
                 **(handoff_receipt.get("saidia_analysis") or {}),
+                # Local deterministic results remain authoritative; Make returns
+                # a display copy that may stringify booleans.
+                **(submitted_complaint.get("case_analysis") or {}),
             }
             human_review = handoff_receipt.get("human_review") or {
                 "final_decision_owner": "human_reviewer",
@@ -1291,10 +1311,33 @@ else:
             for message in case_chat:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
-            case_question = st.chat_input(
-                "Ask what the policy requires or what the reviewer should verify",
-                key="customer_case_question",
+            st.markdown("**Suggested questions**")
+            suggestion_columns = st.columns(3)
+            suggestions = (
+                "What evidence is still missing?",
+                "Was this claim reported within the deadline?",
+                "What should the reviewer verify next?",
             )
+            case_question = None
+            for column, suggestion in zip(suggestion_columns, suggestions):
+                if column.button(
+                    suggestion,
+                    key=f"case_suggestion_{hashlib.sha256(suggestion.encode()).hexdigest()[:8]}",
+                    use_container_width=True,
+                ):
+                    case_question = suggestion
+            with st.form("customer_case_question_form", clear_on_submit=True):
+                typed_question = st.text_input(
+                    "Your question",
+                    placeholder=(
+                        "Ask what the policy requires or what the reviewer should verify"
+                    ),
+                )
+                question_submitted = st.form_submit_button(
+                    "Ask Saidia", use_container_width=True
+                )
+            if question_submitted and typed_question.strip():
+                case_question = typed_question.strip()
             if case_question:
                 prior_history = list(case_chat)
                 case_chat.append({"role": "user", "content": case_question})

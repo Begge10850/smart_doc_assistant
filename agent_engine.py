@@ -591,7 +591,9 @@ def answer_customer_case_question(question, *, complaint, analysis, chat_history
         "that an image exists; never claim to have interpreted an image. Never approve or "
         "deny a claim, decide liability, promise a refund, or invent policy rules. You may "
         "explain whether documented prerequisites appear met and what the human reviewer "
-        "should verify. Keep answers concise, state when evidence is insufficient, and "
+        "should verify. The current policy context does not establish complete reimbursement "
+        "eligibility or late-filing exception rules; say so when reimbursement is discussed. "
+        "Keep answers concise, state when evidence is insufficient, and "
         "remind the user that a human reviewer retains the final decision when relevant."
     )
     input_items = _recent_conversation(chat_history)
