@@ -24,15 +24,32 @@ class FakeUpload:
 
 
 class CustomerIntakeTests(unittest.TestCase):
-    def test_damage_requires_photo_and_delivery_date(self):
+    def test_damage_accepts_incomplete_evidence_but_requires_delivery_date(self):
         errors = validate_customer_submission(
             "TRACK-1", "Germany", None,
             "parcel_damage", "customer@example.com", []
         )
         self.assertTrue(any("delivery date" in error for error in errors))
-        self.assertTrue(any("damaged item" in error for error in errors))
-        self.assertTrue(any("external packaging" in error for error in errors))
-        self.assertTrue(any("proof of value" in error for error in errors))
+        self.assertFalse(any("damaged item" in error for error in errors))
+        self.assertFalse(any("external packaging" in error for error in errors))
+        self.assertFalse(any("proof of value" in error for error in errors))
+
+    def test_future_actual_delivery_date_is_rejected(self):
+        errors = validate_customer_submission(
+            "TRACK-1", "Germany", date.today().replace(year=date.today().year + 1),
+            "parcel_damage", "customer@example.com", [],
+            complaint_details={"declared_value": "EUR 50"}, evidence_types=[],
+        )
+        self.assertTrue(any("cannot be in the future" in error for error in errors))
+
+    def test_incomplete_evidence_is_recorded_for_policy_review(self):
+        complaint = build_customer_complaint(
+            "Recipient", "TRACK-1", "Germany", date(2026, 8, 27), "EUR 50",
+            "parcel_damage", "customer@example.com", "", [],
+            complaint_details={"declared_value": "EUR 50"},
+            evidence_types=["damage_photo", "packaging_photo"],
+        )
+        self.assertEqual(complaint["intake_completeness"], "incomplete")
 
     def test_complete_damage_submission_passes_complaint_requirements(self):
         errors = validate_customer_submission(
@@ -56,7 +73,7 @@ class CustomerIntakeTests(unittest.TestCase):
         self.assertTrue(any("latest tracking status" in item for item in lost_errors))
         self.assertFalse(any("recipient confirmation" in item for item in lost_errors))
         self.assertTrue(any("recipient confirmation" in item for item in non_delivery_errors))
-        self.assertTrue(any("carrier tracking shows delivered" in item for item in non_delivery_errors))
+        self.assertFalse(any("carrier tracking shows delivered" in item for item in non_delivery_errors))
 
     def test_late_delivery_calculation_and_human_review_guidance(self):
         self.assertEqual(

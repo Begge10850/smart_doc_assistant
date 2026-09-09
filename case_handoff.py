@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -342,7 +343,11 @@ def _parse_jira_result(response_text: str) -> Dict[str, Any]:
     try:
         response_data = json.loads(response_text)
     except (TypeError, ValueError):
-        return {}
+        # Generated prose can contain an unescaped quote when Make constructs
+        # JSON manually. Preserve only the non-sensitive Jira key rather than
+        # discarding the otherwise completed workflow response.
+        key_match = re.search(r"\b[A-Z][A-Z0-9]+-\d+\b", str(response_text))
+        return {"issue_key": key_match.group(0)} if key_match else {}
     if not isinstance(response_data, dict):
         return {}
 
@@ -400,7 +405,8 @@ def _parse_customer_make_response(response_text: str) -> Dict[str, Any]:
     try:
         response_data = json.loads(response_text)
     except (TypeError, ValueError):
-        return {}
+        recovered_jira = _parse_jira_result(response_text)
+        return {"jira_result": recovered_jira} if recovered_jira else {}
     if not isinstance(response_data, dict):
         return {}
 

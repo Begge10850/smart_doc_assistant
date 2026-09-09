@@ -750,9 +750,10 @@ def render_customer_processing_wait():
         st.rerun()
 
     with st.status("Preparing your case for human review…", expanded=True):
-        st.write("Securing and preparing the supplied evidence")
-        st.write("Applying the structured carrier policy")
-        st.write("Waiting for Make and Jira to return the completed ticket")
+        st.progress(65, text="Processing case and creating the Jira review ticket")
+        st.write("✓ Report received and case reference created")
+        st.write("✓ Form hidden to prevent an accidental duplicate submission")
+        st.write("⏳ Preparing evidence, applying policy, and waiting for Jira")
     st.caption(
         "You can keep this page open. Only this status panel refreshes while "
         "the form stays hidden."
@@ -1055,11 +1056,18 @@ elif customer_intake_view == "form":
 
         if incident_type:
             evidence_types = st.multiselect(
-                "Confirm the required evidence included in the files below *",
+                "Which evidence are you providing? (optional)",
                 options=list(COMPLAINT_REQUIREMENTS[incident_type]["required_evidence"]),
                 format_func=lambda value: EVIDENCE_TYPE_LABELS[value],
                 key="customer_evidence_types",
-                help="Select every evidence type present, then upload the matching files.",
+                help=(
+                    "Select only the evidence actually included. You can submit an "
+                    "incomplete claim; missing requirements will be flagged for review."
+                ),
+            )
+            st.caption(
+                "You may submit now even if some required evidence is unavailable. "
+                "The reviewer will see what is missing."
             )
         evidence_files = st.file_uploader(
             "Supporting evidence",
@@ -1232,6 +1240,16 @@ else:
             )
         handoff_receipt = submitted_complaint.get("handoff_receipt", {})
         jira_result = handoff_receipt.get("jira_result", {})
+        if jira_result and not jira_result.get("title"):
+            jira_result = {
+                **jira_result,
+                "title": (
+                    f"[Customer claim] {submitted_complaint.get('complaint_type')} — "
+                    f"{submitted_complaint.get('case_reference')}"
+                ),
+                "routing": "Saidia Logistics Incidents / Human review",
+                "status": "To Do",
+            }
         if jira_result:
             st.divider()
             st.success("Backend workflow completed and returned a Jira ticket.")

@@ -44,6 +44,18 @@ def make_case():
 
 
 class CaseHandoffTests(unittest.TestCase):
+    def test_invalid_make_json_recovers_jira_key(self):
+        response = '{"jira_result":{"issue_key":"KAN-38","summary":"a "quote""}}'
+        with patch(
+            "case_handoff._read_make_webhook_url",
+            return_value="https://hook.eu2.make.com/example",
+        ):
+            receipt = send_case_to_make(
+                make_case(),
+                post_request=lambda *_args, **_kwargs: (200, response),
+            )
+        self.assertEqual(receipt["jira_result"]["issue_key"], "KAN-38")
+
     def test_customer_update_targets_existing_jira_issue(self):
         case_update = {
             "case_reference": "CASE-20260826-ABC123",

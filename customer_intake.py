@@ -108,10 +108,6 @@ def validate_customer_submission(
     selected_evidence = set(evidence_types or [])
     if selected_evidence and not list(evidence_files or []):
         errors.append("Upload the evidence files you identified.")
-    for evidence_type in requirements.get("required_evidence", ()):
-        if evidence_type not in selected_evidence:
-            errors.append(f"Provide {EVIDENCE_TYPE_LABELS[evidence_type].lower()}.")
-
     image_evidence = {"damage_photo", "packaging_photo"}.intersection(selected_evidence)
     if image_evidence:
         image_count = sum(
@@ -125,6 +121,16 @@ def validate_customer_submission(
 
     promised = _as_date(details.get("promised_delivery_date"))
     actual = _as_date(details.get("actual_delivery_date"))
+    actual_dates = {
+        "delivery date": _as_date(details.get("delivery_date")),
+        "actual delivery date": actual,
+        "carrier-recorded delivery date": _as_date(
+            details.get("carrier_recorded_delivery_date")
+        ),
+    }
+    for label, actual_date in actual_dates.items():
+        if actual_date and actual_date > date.today():
+            errors.append(f"The {label} cannot be in the future.")
     if complaint_type == "late_delivery" and promised and actual and actual <= promised:
         errors.append("Actual delivery must be after the promised delivery date for a late-delivery complaint.")
     return errors
@@ -263,7 +269,13 @@ def build_customer_complaint(
         "evidence_types": sorted(set(evidence_types or [])),
         "complaint_details": normalized_details,
         "intake_source": "web_form",
-        "intake_completeness": "complete",
+        "intake_completeness": (
+            "complete"
+            if set(COMPLAINT_REQUIREMENTS.get(complaint_type, {}).get(
+                "required_evidence", ()
+            )).issubset(set(evidence_types or []))
+            else "incomplete"
+        ),
         "downstream_processing_status": "not_connected",
     }
     return complaint
