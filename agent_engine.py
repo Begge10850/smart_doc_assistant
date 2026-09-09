@@ -536,3 +536,90 @@ def run_document_agent(
             "The document agent could not complete this request. Check the API "
             "model access, usage limits, and application logs."
         ) from exc
+
+
+def answer_customer_case_question(question, *, complaint, analysis, chat_history=None):
+    """Answer from allow-listed case data, deterministic policy output, and text evidence."""
+    api_key, model = _read_openai_settings()
+    excerpts = []
+    searchable_evidence = [
+        item for item in complaint.get("evidence", []) if item.get("document_id")
+    ]
+    if searchable_evidence:
+        query_embedding = get_embedding_model().encode(question)
+        for item in searchable_evidence:
+            rows = search_document_chunks(
+                document_id=item["document_id"],
+                query_embedding=query_embedding,
+                limit=2,
+            )
+            excerpts.extend(
+                {
+                    "file": item.get("file_name"),
+                    "text": text,
+                    "similarity": float(similarity),
+                }
+                for _chunk_index, text, similarity in rows
+            )
+
+    safe_case = {
+        key: complaint.get(key)
+        for key in (
+            "case_reference", "tracking_number", "complaint_type", "claimant_role",
+            "carrier", "country", "reported_at", "delivery_date", "declared_value",
+            "additional_information", "complaint_details", "evidence_types",
+        )
+    }
+    evidence_inventory = [
+        {
+            "file_name": item.get("file_name"),
+            "content_type": item.get("content_type"),
+            "processing_status": item.get("processing_status"),
+        }
+        for item in complaint.get("evidence", [])
+    ]
+    context = {
+        "case": safe_case,
+        "deterministic_policy_assessment": analysis,
+        "evidence_inventory": evidence_inventory,
+        "retrieved_document_excerpts": excerpts[:6],
+    }
+    instructions = (
+        "You are Saidia's read-only claims-review assistant for a fictional NorthStar "
+        "Parcel demonstration. Answer only from the supplied verified context. Separate "
+        "case facts, policy requirements, and unresolved matters. A filename proves only "
+        "that an image exists; never claim to have interpreted an image. Never approve or "
+        "deny a claim, decide liability, promise a refund, or invent policy rules. You may "
+        "explain whether documented prerequisites appear met and what the human reviewer "
+        "should verify. Keep answers concise, state when evidence is insufficient, and "
+        "remind the user that a human reviewer retains the final decision when relevant."
+    )
+    input_items = _recent_conversation(chat_history)
+    input_items.append({
+        "role": "user",
+        "content": (
+            "Verified case context:\n"
+            + json.dumps(context, default=str)
+            + "\n\nEmployee question: "
+            + str(question)
+        ),
+    })
+    try:
+        response = OpenAI(api_key=api_key).responses.create(
+            model=model,
+            instructions=instructions,
+            input=input_items,
+            reasoning={"effort": "low"},
+            text={"verbosity": "low"},
+            max_output_tokens=700,
+        )
+        answer = (response.output_text or "").strip()
+        if not answer:
+            raise DocumentAgentError("The case assistant returned an empty answer.")
+        return answer
+    except DocumentAgentError:
+        raise
+    except Exception as exc:
+        raise DocumentAgentError(
+            "The case assistant could not answer this question right now."
+        ) from exc

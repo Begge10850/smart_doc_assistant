@@ -1,15 +1,18 @@
 import asyncio
 import copy
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 import time
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from agent_engine import (
+    answer_customer_case_question,
     DocumentAgentError,
     NonIncidentDocumentError,
     prepare_incident_case,
@@ -141,6 +144,7 @@ def start_customer_report():
     reset_customer_form_state()
     st.session_state.pop("customer_complaint", None)
     st.session_state.pop("customer_case_handoff_receipt", None)
+    st.session_state.pop("customer_case_chat_messages", None)
     st.session_state.customer_intake_view = "form"
 
 
@@ -156,6 +160,7 @@ def return_to_case_options():
     reset_customer_form_state()
     st.session_state.pop("customer_complaint", None)
     st.session_state.pop("customer_case_update", None)
+    st.session_state.pop("customer_case_chat_messages", None)
     st.session_state.customer_intake_view = "landing"
 
 def run_customer_stage(
@@ -535,9 +540,27 @@ def _display_value(value):
     return str(value)
 
 
-def _render_detail_table(values, fields):
+def _display_datetime(value):
+    """Format stored ISO timestamps for the NorthStar operations timezone."""
+    if not value:
+        return "Not provided"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+        local = parsed.astimezone(ZoneInfo("Europe/Berlin"))
+        return local.strftime("%-d %b %Y, %H:%M %Z")
+    except (TypeError, ValueError):
+        return _display_value(value)
+
+
+def _render_detail_table(values, fields, *, formatters=None):
+    formatters = formatters or {}
     rows = [
-        {"Field": label, "Value": _display_value(values.get(field))}
+        {
+            "Field": label,
+            "Value": formatters.get(field, _display_value)(values.get(field)),
+        }
         for field, label in fields
         if field in values
     ]
@@ -546,7 +569,7 @@ def _render_detail_table(values, fields):
 
 
 def build_policy_assessment(analysis, case_details):
-    """Turn deterministic policy results into an auditable employee briefing."""
+    """Turn deterministic policy results into a concise employee briefing."""
     if analysis.get("policy_match_status") != "matched":
         return {
             "classification": (
@@ -554,8 +577,9 @@ def build_policy_assessment(analysis, case_details):
                 "manual policy selection before any claim decision."
             ),
             "supporting_evidence": [],
-            "rules_followed": [],
-            "rules_missed": ["A single applicable policy could not be established."],
+            "filing": "Not assessed",
+            "evidence": "Not assessed",
+            "missing": ["A single applicable policy could not be established."],
         }
 
     policy_title = analysis.get("policy_title") or "The matched policy"
@@ -588,40 +612,27 @@ def build_policy_assessment(analysis, case_details):
         if str(item).strip().casefold() not in normalized_missing
     ]
 
-    rules_followed = [
-        f"Country scope matched: {country}.",
-        f"Claim category matched: {incident_type}.",
-    ]
-    rules_missed = []
     deadline = analysis.get("claim_deadline")
     reported_on_time = analysis.get("reported_on_time")
     if deadline and reported_on_time is True:
-        rules_followed.append(
-            f"Reporting-time rule satisfied: the claim was received by {deadline}."
-        )
+        filing = f"Met — filed by the {deadline} deadline"
     elif deadline and reported_on_time is False:
-        rules_missed.append(
-            f"Reporting-time rule missed: the claim was received after {deadline}."
-        )
+        filing = f"Missed — filed after the {deadline} deadline"
     elif deadline:
-        rules_missed.append(
-            f"Reporting compliance is unresolved; the calculated deadline is {deadline}."
-        )
+        filing = f"Unresolved — deadline calculated as {deadline}"
     else:
-        rules_missed.append("The reporting deadline could not be calculated.")
-
-    if missing:
-        rules_missed.extend(
-            f"Required evidence missing: {item}." for item in missing
-        )
-    else:
-        rules_followed.append("All listed policy evidence requirements are satisfied.")
+        filing = "Unresolved — deadline could not be calculated"
+    evidence_status = (
+        f"Incomplete — {len(missing)} required item(s) missing"
+        if missing else "Complete — all listed requirements are represented"
+    )
 
     return {
         "classification": classification,
         "supporting_evidence": supporting_evidence,
-        "rules_followed": rules_followed,
-        "rules_missed": rules_missed,
+        "filing": filing,
+        "evidence": evidence_status,
+        "missing": missing,
     }
 
 
@@ -664,7 +675,7 @@ def render_jira_ticket(
             ("additional_information", "Additional information"),
             ("complaint_details", "Complaint-specific details"),
             ("evidence_types", "Evidence types"),
-        ))
+        ), formatters={"reported_at": _display_datetime})
 
     if saidia_analysis:
         st.markdown("#### Saidia grounded analysis")
@@ -681,28 +692,17 @@ def render_jira_ticket(
         st.markdown("**Applicable NorthStar policy—and why**")
         st.write(assessment["classification"])
 
-        st.markdown("**Evidence that satisfied the policy requirements**")
-        _render_bullets(
-            assessment["supporting_evidence"],
-            empty_message="No required evidence has yet been confirmed as satisfied.",
-        )
-
-        st.markdown("**Policy rules followed**")
-        _render_bullets(
-            assessment["rules_followed"],
-            empty_message="No policy rules have yet been confirmed as satisfied.",
-        )
-
-        st.markdown("**Policy rules missed or unresolved**")
-        _render_bullets(
-            assessment["rules_missed"],
-            empty_message="No policy rules are currently identified as missed.",
-        )
-
-        handling_guidance = saidia_analysis.get("handling_guidance") or []
-        if handling_guidance:
-            st.markdown("**Policy guidance for the reviewing employee**")
-            _render_bullets(handling_guidance, empty_message="")
+        st.markdown("**Claim assessment**")
+        st.table([
+            {"Check": "Filing deadline", "Result": assessment["filing"]},
+            {"Check": "Required evidence", "Result": assessment["evidence"]},
+        ])
+        if assessment["supporting_evidence"]:
+            st.markdown("**Evidence matched to policy requirements**")
+            _render_bullets(assessment["supporting_evidence"], empty_message="")
+        if assessment["missing"]:
+            st.markdown("**Still needed or unresolved**")
+            _render_bullets(assessment["missing"], empty_message="")
 
         recommended_action = (
             saidia_analysis.get("recommended_next_action") or fallback_action
@@ -716,11 +716,7 @@ def render_jira_ticket(
             )
 
     if human_review:
-        st.markdown("#### Human review")
-        _render_detail_table(human_review, (
-            ("final_decision_owner", "Final decision owner"),
-            ("message", "Review notice"),
-        ))
+        st.caption("Decision authority: a human reviewer makes the final claim decision.")
 
     evidence_rows = [
         {
@@ -1266,6 +1262,39 @@ else:
                 human_review=human_review,
                 evidence=submitted_complaint.get("evidence"),
             )
+            st.markdown("#### Ask Saidia about this case")
+            st.caption(
+                "Answers use verified case details, the structured NorthStar policy, "
+                "and searchable text evidence. Images remain for human inspection."
+            )
+            case_chat = st.session_state.setdefault(
+                "customer_case_chat_messages", []
+            )
+            for message in case_chat:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            case_question = st.chat_input(
+                "Ask what the policy requires or what the reviewer should verify",
+                key="customer_case_question",
+            )
+            if case_question:
+                prior_history = list(case_chat)
+                case_chat.append({"role": "user", "content": case_question})
+                with st.chat_message("user"):
+                    st.markdown(case_question)
+                with st.chat_message("assistant"):
+                    with st.spinner("Checking the case and policy…"):
+                        try:
+                            case_answer = answer_customer_case_question(
+                                case_question,
+                                complaint=submitted_complaint,
+                                analysis=saidia_analysis,
+                                chat_history=prior_history,
+                            )
+                        except DocumentAgentError as exc:
+                            case_answer = str(exc)
+                    st.markdown(case_answer)
+                case_chat.append({"role": "assistant", "content": case_answer})
             st.caption(
                 f"Event ID: `{handoff_receipt['event_id']}` · "
                 f"HTTP {handoff_receipt['http_status']}"
