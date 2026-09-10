@@ -1468,7 +1468,7 @@ if customer_intake_view == "form" and complaint_submitted:
             st.error(validation_error)
     else:
         existing_case = find_active_customer_case(
-            tracking_number, incident_type
+            tracking_number, CONFIGURED_CARRIER
         )
         if existing_case:
             record_duplicate_submission_attempt(

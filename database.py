@@ -96,20 +96,21 @@ def create_customer_case(complaint):
     return customer_case_id
 
 
-def find_active_customer_case(tracking_number, complaint_type):
-    """Find an existing active case for the same shipment problem."""
+def find_active_customer_case(tracking_number, carrier):
+    """Find the earliest active case for the same carrier shipment."""
     query = """
-        select case_reference, status, downstream_processing_status, reported_at
+        select case_reference, status, downstream_processing_status, reported_at,
+               complaint_type
         from customer_cases
-        where upper(tracking_number) = upper(%s)
-          and complaint_type = %s
+        where upper(trim(tracking_number)) = upper(trim(%s))
+          and upper(trim(carrier)) = upper(trim(%s))
           and status not in ('closed', 'cancelled')
-        order by reported_at desc
+        order by reported_at asc, id asc
         limit 1;
     """
     with psycopg.connect(get_database_url()) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(query, (tracking_number.strip(), complaint_type))
+            cursor.execute(query, (tracking_number, carrier))
             row = cursor.fetchone()
             if row is None:
                 return None
@@ -118,6 +119,7 @@ def find_active_customer_case(tracking_number, complaint_type):
                 "status": row[1],
                 "downstream_processing_status": row[2],
                 "reported_at": row[3].isoformat(),
+                "complaint_type": row[4],
             }
 
 
