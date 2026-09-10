@@ -580,6 +580,10 @@ def answer_customer_case_question(question, *, complaint, analysis, chat_history
     ]
     context = {
         "case": safe_case,
+        "intake_duplicate_check": (
+            "No active matching case was found when this new case was created. "
+            "A matching active case would have been routed to the duplicate flow."
+        ),
         "deterministic_policy_assessment": analysis,
         "evidence_inventory": evidence_inventory,
         "retrieved_document_excerpts": excerpts[:6],

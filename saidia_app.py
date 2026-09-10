@@ -144,6 +144,7 @@ def start_customer_report():
     st.session_state.pop("customer_complaint", None)
     st.session_state.pop("customer_case_handoff_receipt", None)
     st.session_state.pop("customer_case_chat_messages", None)
+    st.session_state.pop("customer_processing_future", None)
     st.session_state.customer_intake_view = "form"
 
 
@@ -151,6 +152,7 @@ def start_customer_update():
     """Open a fresh existing-case update form."""
     reset_customer_form_state()
     st.session_state.pop("customer_case_update", None)
+    st.session_state.pop("customer_update_processing_future", None)
     st.session_state.customer_intake_view = "update_form"
 
 
@@ -160,6 +162,8 @@ def return_to_case_options():
     st.session_state.pop("customer_complaint", None)
     st.session_state.pop("customer_case_update", None)
     st.session_state.pop("customer_case_chat_messages", None)
+    st.session_state.pop("customer_processing_future", None)
+    st.session_state.pop("customer_update_processing_future", None)
     st.session_state.customer_intake_view = "landing"
 
 def run_customer_stage(
@@ -471,6 +475,61 @@ def complete_customer_case_processing(complaint):
     return complaint
 
 
+def complete_customer_case_update_processing(case_update):
+    """Prepare an existing-case update without blocking the Streamlit form run."""
+    try:
+        case_update = process_customer_evidence(case_update)
+        case_update["new_additional_information"] = case_update.get(
+            "additional_information", ""
+        )
+        case_update["additional_information"] = "\n".join(filter(None, [
+            case_update.get("original_additional_information"),
+            case_update.get("additional_information"),
+        ]))
+        analysis = run_customer_stage(
+            case_update["case_reference"],
+            "case_update_analysis",
+            prepare_customer_case_analysis,
+            case_update,
+        )
+        case_update["case_analysis"] = analysis
+        save_customer_case_analysis(case_update["case_reference"], analysis, "completed")
+        update_customer_case_update_status(case_update["update_reference"], "processed")
+        if customer_case_handoff_enabled():
+            jira_result = get_latest_customer_jira_result(case_update["case_reference"])
+            if jira_result:
+                try:
+                    update_receipt = send_customer_case_update_to_make(
+                        case_update,
+                        jira_result=jira_result,
+                        download_url_factory=create_private_evidence_download_url,
+                    )
+                    save_customer_workflow_result(
+                        case_reference=case_update["case_reference"],
+                        event_id=update_receipt["event_id"],
+                        event_type=CUSTOMER_UPDATE_EVENT_TYPE,
+                        event_version=CUSTOMER_UPDATE_EVENT_VERSION,
+                        handoff_status=update_receipt["status"],
+                        jira_result=update_receipt.get("jira_result"),
+                    )
+                except Exception:
+                    update_customer_case_update_status(
+                        case_update["update_reference"],
+                        "processed_handoff_pending",
+                        "The Jira update handoff did not complete.",
+                    )
+    except Exception:
+        for evidence_item in case_update["evidence"]:
+            evidence_item.pop("data", None)
+        update_customer_case_update_status(
+            case_update["update_reference"],
+            "processing_failed",
+            "The case update could not be fully prepared.",
+        )
+        case_update["processing_status"] = "processing_failed"
+    return case_update
+
+
 def process_customer_case_in_background(complaint):
     """Finish evidence, analysis, and handoff after the case is acknowledged."""
     try:
@@ -775,6 +834,23 @@ def render_customer_processing_wait():
         "You can keep this page open. Only this status panel refreshes while "
         "the form stays hidden."
     )
+
+
+@st.fragment(run_every=2)
+def render_customer_update_wait():
+    """Refresh only the update status while its form remains hidden."""
+    processing_future = st.session_state.get("customer_update_processing_future")
+    if processing_future is None:
+        st.rerun()
+    if processing_future.done():
+        st.session_state.customer_case_update = processing_future.result()
+        st.session_state.pop("customer_update_processing_future", None)
+        st.session_state.customer_intake_view = "update_success"
+        st.rerun()
+    with st.status("Adding information to the existing case…", expanded=True):
+        st.progress(65, text="Preparing evidence and updating the Jira case")
+        st.write("✓ Update received and form hidden")
+        st.write("⏳ Securing evidence and notifying the reviewing team")
 
 
 def render_incident_case(incident_case):
@@ -1194,6 +1270,7 @@ elif customer_intake_view == "update_processing":
             "Preparing the new information and evidence for the case reviewer. "
             "This page will update automatically."
         )
+        render_customer_update_wait()
     else:
         st.session_state.customer_intake_view = "landing"
         st.rerun()
@@ -1250,6 +1327,14 @@ else:
             st.caption(
                 "Your original evidence is stored securely and is available for "
                 "human review."
+            )
+        if processing_future is None or processing_future.done():
+            st.button(
+                "Return to case options",
+                type="primary",
+                use_container_width=True,
+                on_click=return_to_case_options,
+                key="customer_return_near_confirmation",
             )
         handoff_receipt = submitted_complaint.get("handoff_receipt", {})
         jira_result = handoff_receipt.get("jira_result", {})
@@ -1363,15 +1448,6 @@ else:
                 "Make accepted the case, but its webhook response did not include "
                 "a Jira issue key. Check the final Webhook Response module mapping."
             )
-        if processing_future is None or processing_future.done():
-            st.button(
-                "Return to case options",
-                type="primary",
-                use_container_width=True,
-                on_click=lambda: st.session_state.update(
-                    customer_intake_view="landing"
-                ),
-            )
     else:
         st.session_state.customer_intake_view = "landing"
         st.rerun()
@@ -1482,6 +1558,12 @@ if customer_intake_view == "update_form" and case_update_submitted:
             )
         elif case_update_id is not None:
             st.session_state.customer_case_update = case_update
+            st.session_state.customer_update_processing_future = (
+                get_customer_processing_executor().submit(
+                    complete_customer_case_update_processing,
+                    copy.deepcopy(case_update),
+                )
+            )
             st.session_state.reset_customer_form_on_rerun = True
             st.session_state.customer_intake_view = "update_processing"
             st.rerun()
@@ -1506,71 +1588,6 @@ if customer_intake_view == "processing":
                 pass
         st.session_state.customer_complaint = complaint
         st.session_state.customer_intake_view = "success"
-        st.rerun()
-
-if customer_intake_view == "update_processing":
-    case_update = st.session_state.get("customer_case_update")
-    if case_update:
-        try:
-            case_update = process_customer_evidence(case_update)
-            case_update["new_additional_information"] = case_update.get(
-                "additional_information", ""
-            )
-            case_update["additional_information"] = "\n".join(filter(None, [
-                case_update.get("original_additional_information"),
-                case_update.get("additional_information"),
-            ]))
-            analysis = run_customer_stage(
-                case_update["case_reference"],
-                "case_update_analysis",
-                prepare_customer_case_analysis,
-                case_update,
-            )
-            case_update["case_analysis"] = analysis
-            save_customer_case_analysis(
-                case_update["case_reference"], analysis, "completed"
-            )
-            update_customer_case_update_status(
-                case_update["update_reference"], "processed"
-            )
-            if customer_case_handoff_enabled():
-                jira_result = get_latest_customer_jira_result(
-                    case_update["case_reference"]
-                )
-                if jira_result:
-                    try:
-                        update_receipt = send_customer_case_update_to_make(
-                            case_update,
-                            jira_result=jira_result,
-                            download_url_factory=create_private_evidence_download_url,
-                        )
-                        save_customer_workflow_result(
-                            case_reference=case_update["case_reference"],
-                            event_id=update_receipt["event_id"],
-                            event_type=CUSTOMER_UPDATE_EVENT_TYPE,
-                            event_version=CUSTOMER_UPDATE_EVENT_VERSION,
-                            handoff_status=update_receipt["status"],
-                            jira_result=update_receipt.get("jira_result"),
-                        )
-                    except Exception:
-                        # Evidence is already safe. Jira delivery can be retried
-                        # internally without asking the customer to upload again.
-                        update_customer_case_update_status(
-                            case_update["update_reference"],
-                            "processed_handoff_pending",
-                            "The Jira update handoff did not complete.",
-                        )
-        except Exception:
-            for evidence_item in case_update["evidence"]:
-                evidence_item.pop("data", None)
-            update_customer_case_update_status(
-                case_update["update_reference"],
-                "processing_failed",
-                "The case update could not be fully prepared.",
-            )
-            case_update["processing_status"] = "processing_failed"
-        st.session_state.customer_case_update = case_update
-        st.session_state.customer_intake_view = "update_success"
         st.rerun()
 
 # Keep the existing backend workflow intact but out of the customer experience
