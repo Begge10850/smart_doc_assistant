@@ -38,15 +38,23 @@ class CustomerIntakeTests(unittest.TestCase):
         errors = validate_customer_submission(
             "TRACK-1", "Germany", date.today().replace(year=date.today().year + 1),
             "parcel_damage", "customer@example.com", [],
-            complaint_details={"declared_value": "EUR 50"}, evidence_types=[],
+            complaint_details={"declared_value": "50"}, evidence_types=[],
         )
         self.assertTrue(any("cannot be in the future" in error for error in errors))
 
+    def test_declared_value_rejects_non_numeric_text(self):
+        errors = validate_customer_submission(
+            "TRACK-1", "Germany", date(2026, 8, 27), "parcel_damage",
+            "customer@example.com", [],
+            complaint_details={"declared_value": "757890i"}, evidence_types=[],
+        )
+        self.assertTrue(any("numbers only" in error for error in errors))
+
     def test_incomplete_evidence_is_recorded_for_policy_review(self):
         complaint = build_customer_complaint(
-            "Recipient", "TRACK-1", "Germany", date(2026, 8, 27), "EUR 50",
+            "Recipient", "TRACK-1", "Germany", date(2026, 8, 27), "50",
             "parcel_damage", "customer@example.com", "", [],
-            complaint_details={"declared_value": "EUR 50"},
+            complaint_details={"declared_value": "50"},
             evidence_types=["damage_photo", "packaging_photo"],
         )
         self.assertEqual(complaint["intake_completeness"], "incomplete")
@@ -56,7 +64,7 @@ class CustomerIntakeTests(unittest.TestCase):
             "TRACK-1", "Germany", date(2026, 8, 27),
             "parcel_damage", "customer@example.com",
             [FakeUpload("damage.jpg"), FakeUpload("packaging.jpg")],
-            complaint_details={"declared_value": "EUR 50"},
+            complaint_details={"declared_value": "50"},
             evidence_types=["damage_photo", "packaging_photo", "proof_of_value"],
         )
         self.assertEqual(errors, [])
@@ -109,7 +117,11 @@ class CustomerIntakeTests(unittest.TestCase):
         self.assertEqual(details["delay_duration_days"], 2)
         self.assertEqual(
             details["reimbursement_recommendation"],
-            "review_full_delivery_fee_reimbursement",
+            "requires_internal_cause_and_exclusion_review",
+        )
+        self.assertEqual(
+            details["delay_cause_review_status"],
+            "pending_carrier_record_review",
         )
         self.assertTrue(details["reimbursement_requires_human_review"])
         self.assertEqual(complaint["intake_source"], "web_form")
@@ -126,7 +138,7 @@ class CustomerIntakeTests(unittest.TestCase):
     def test_normalized_contract_uses_canonical_values(self):
         complaint = build_customer_complaint(
             "Recipient", " TRACK-1 ", "Germany",
-            date(2026, 8, 26), " EUR 899.00 ", "parcel_damage",
+            date(2026, 8, 26), "899.00", "parcel_damage",
             " Customer@Example.com ", " Screen broken ",
             [FakeUpload("../damage.jpg")],
         )

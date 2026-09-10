@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -104,6 +105,13 @@ def validate_customer_submission(
         value = details.get(field)
         if value is None or (isinstance(value, str) and not value.strip()) or value is False:
             errors.append(f"Enter {FIELD_LABELS[field]}.")
+    declared_value = details.get("declared_value")
+    if declared_value not in (None, ""):
+        try:
+            if Decimal(str(declared_value).strip()) <= 0:
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            errors.append("Enter the declared or purchase value using numbers only.")
 
     selected_evidence = set(evidence_types or [])
     if selected_evidence and not list(evidence_files or []):
@@ -245,11 +253,12 @@ def build_customer_complaint(
         promised_date, actual_date
     )
     normalized_details.setdefault("policy_exclusions", [])
+    normalized_details["delay_cause_review_status"] = (
+        "pending_carrier_record_review" if complaint_type == "late_delivery" else None
+    )
     normalized_details["reimbursement_recommendation"] = (
-        recommend_late_delivery_fee_review(
-            normalized_details["delay_duration_days"],
-            normalized_details["policy_exclusions"],
-        ) if complaint_type == "late_delivery" else None
+        "requires_internal_cause_and_exclusion_review"
+        if complaint_type == "late_delivery" else None
     )
     normalized_details["reimbursement_requires_human_review"] = True
     complaint = {
@@ -261,7 +270,10 @@ def build_customer_complaint(
         "carrier": CONFIGURED_CARRIER,
         "country": country.strip(),
         "delivery_date": delivery_date.isoformat() if delivery_date else None,
-        "declared_value": declared_value.strip(),
+        "declared_value": (
+            format(Decimal(str(declared_value)), "f")
+            if declared_value not in (None, "") else ""
+        ),
         "complaint_type": complaint_type,
         "customer_email": customer_email.strip().lower(),
         "additional_information": additional_information.strip(),

@@ -115,7 +115,6 @@ CUSTOMER_FORM_WIDGET_KEYS = [
     "customer_package_contents_description",
     "customer_missing_items_description",
     "customer_recipient_statement",
-    "customer_policy_exclusions",
     "customer_evidence_types",
     "customer_declared_value",
     "customer_evidence_files",
@@ -1034,18 +1033,10 @@ elif customer_intake_view == "form":
             )
             complaint_details["actual_delivery_date"] = actual_date
             delivery_date = actual_date
-            complaint_details["policy_exclusions"] = st.multiselect(
-                "Known delay circumstances (optional; reviewed against policy)",
-                options=[
-                    "severe_weather", "customs_delay",
-                    "customer_requested_delivery_change", "incomplete_address",
-                ],
-                format_func=lambda value: value.replace("_", " ").title(),
-                key="customer_policy_exclusions",
-            )
             st.caption(
-                "Any delivery-fee reimbursement is only a policy-guided "
-                "recommendation and always requires human review."
+                "NorthStar's reviewing team will verify the cause of the delay "
+                "from carrier records. You only need to provide the promised and "
+                "actual delivery information available to you."
             )
         if incident_type == "partial_loss":
             complaint_details["missing_items_description"] = st.text_area(
@@ -1065,9 +1056,13 @@ elif customer_intake_view == "form":
             )
 
         if incident_type in {"parcel_damage", "lost_parcel", "partial_loss"}:
-            declared_value = st.text_input(
+            declared_value = st.number_input(
                 "Declared or purchase value *",
-                placeholder="For example, EUR 899.00",
+                min_value=0.01,
+                value=None,
+                step=0.01,
+                format="%.2f",
+                placeholder="For example, 899.00",
                 key="customer_declared_value",
             )
             complaint_details["declared_value"] = declared_value
