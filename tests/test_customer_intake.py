@@ -3,12 +3,11 @@ import unittest
 
 from customer_intake import (
     CONFIGURED_CARRIER,
+    DUPLICATE_CASE_MESSAGE,
     MAX_IMAGE_SIZE_BYTES,
-    build_customer_case_update,
     build_customer_complaint,
     calculate_delay_days,
     recommend_late_delivery_fee_review,
-    validate_case_update,
     validate_customer_submission,
 )
 
@@ -24,6 +23,13 @@ class FakeUpload:
 
 
 class CustomerIntakeTests(unittest.TestCase):
+    def test_duplicate_message_matches_customer_contract(self):
+        self.assertEqual(
+            DUPLICATE_CASE_MESSAGE,
+            "A case has already been opened for this tracking ID. Please wait for "
+            "updates while we investigate.",
+        )
+
     def test_damage_accepts_incomplete_evidence_but_requires_delivery_date(self):
         errors = validate_customer_submission(
             "TRACK-1", "Germany", None,
@@ -147,21 +153,6 @@ class CustomerIntakeTests(unittest.TestCase):
         self.assertEqual(complaint["evidence"][0]["file_name"], "damage.jpg")
         self.assertEqual(complaint["delivery_date"], "2026-08-26")
         self.assertEqual(complaint["carrier"], CONFIGURED_CARRIER)
-
-    def test_case_update_requires_information_or_evidence(self):
-        errors = validate_case_update("CASE-1", "TRACK-1", "", [])
-        self.assertTrue(any("information" in error for error in errors))
-
-    def test_case_update_normalizes_reference_and_evidence(self):
-        case_update = build_customer_case_update(
-            " case-1 ", " TRACK-1 ", " New receipt ",
-            [FakeUpload("../receipt.jpg")],
-        )
-        self.assertEqual(case_update["case_reference"], "CASE-1")
-        self.assertEqual(case_update["tracking_number"], "TRACK-1")
-        self.assertEqual(case_update["evidence"][0]["file_name"], "receipt.jpg")
-        self.assertTrue(case_update["update_reference"].startswith("UPDATE-"))
-
 
 if __name__ == "__main__":
     unittest.main()

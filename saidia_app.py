@@ -22,25 +22,21 @@ from case_handoff import (
     CaseHandoffError,
     CUSTOMER_HANDOFF_EVENT_TYPE,
     CUSTOMER_HANDOFF_EVENT_VERSION,
-    CUSTOMER_UPDATE_EVENT_TYPE,
-    CUSTOMER_UPDATE_EVENT_VERSION,
     customer_case_handoff_enabled,
     send_case_to_make,
-    send_customer_case_update_to_make,
     send_customer_case_to_make,
 )
 from customer_intake import (
     COMPLAINT_TYPE_LABELS,
     COMPLAINT_REQUIREMENTS,
     CONFIGURED_CARRIER,
+    DUPLICATE_CASE_MESSAGE,
     EVIDENCE_TYPE_LABELS,
     POLICY_EVIDENCE_BY_TYPE,
     IMAGE_EVIDENCE_TYPES,
     SUPPORTED_COUNTRIES,
     SUPPORTED_EVIDENCE_TYPES,
-    build_customer_case_update,
     build_customer_complaint,
-    validate_case_update,
     validate_customer_submission,
 )
 from rag_pipeline import process_document
@@ -53,12 +49,10 @@ from s3_upload import (
 from embedding_config import EMBEDDING_MODEL
 from vector_store import chunk_text, embed_chunks
 from database import (
-    create_customer_case_update,
     create_customer_case,
     document_has_embeddings,
     find_active_customer_case,
     get_customer_case_for_handoff,
-    get_latest_customer_jira_result,
     record_duplicate_submission_attempt,
     record_processing_event,
     save_document_chunks,
@@ -66,7 +60,6 @@ from database import (
     save_customer_workflow_result,
     search_document_chunks,
     update_customer_case_status,
-    update_customer_case_update_status,
     update_customer_evidence,
     upsert_document,
 )
@@ -119,10 +112,6 @@ CUSTOMER_FORM_WIDGET_KEYS = [
     "customer_declared_value",
     "customer_evidence_files",
     "customer_additional_information",
-    "customer_update_case_reference",
-    "customer_update_tracking_number",
-    "customer_update_evidence_files",
-    "customer_update_additional_information",
 ]
 
 
@@ -148,22 +137,12 @@ def start_customer_report():
     st.session_state.customer_intake_view = "form"
 
 
-def start_customer_update():
-    """Open a fresh existing-case update form."""
-    reset_customer_form_state()
-    st.session_state.pop("customer_case_update", None)
-    st.session_state.pop("customer_update_processing_future", None)
-    st.session_state.customer_intake_view = "update_form"
-
-
 def return_to_case_options():
     """Abandon an unfinished form and return to the customer landing view."""
     reset_customer_form_state()
     st.session_state.pop("customer_complaint", None)
-    st.session_state.pop("customer_case_update", None)
     st.session_state.pop("customer_case_chat_messages", None)
     st.session_state.pop("customer_processing_future", None)
-    st.session_state.pop("customer_update_processing_future", None)
     st.session_state.customer_intake_view = "landing"
 
 def run_customer_stage(
@@ -475,61 +454,6 @@ def complete_customer_case_processing(complaint):
     return complaint
 
 
-def complete_customer_case_update_processing(case_update):
-    """Prepare an existing-case update without blocking the Streamlit form run."""
-    try:
-        case_update = process_customer_evidence(case_update)
-        case_update["new_additional_information"] = case_update.get(
-            "additional_information", ""
-        )
-        case_update["additional_information"] = "\n".join(filter(None, [
-            case_update.get("original_additional_information"),
-            case_update.get("additional_information"),
-        ]))
-        analysis = run_customer_stage(
-            case_update["case_reference"],
-            "case_update_analysis",
-            prepare_customer_case_analysis,
-            case_update,
-        )
-        case_update["case_analysis"] = analysis
-        save_customer_case_analysis(case_update["case_reference"], analysis, "completed")
-        update_customer_case_update_status(case_update["update_reference"], "processed")
-        if customer_case_handoff_enabled():
-            jira_result = get_latest_customer_jira_result(case_update["case_reference"])
-            if jira_result:
-                try:
-                    update_receipt = send_customer_case_update_to_make(
-                        case_update,
-                        jira_result=jira_result,
-                        download_url_factory=create_private_evidence_download_url,
-                    )
-                    save_customer_workflow_result(
-                        case_reference=case_update["case_reference"],
-                        event_id=update_receipt["event_id"],
-                        event_type=CUSTOMER_UPDATE_EVENT_TYPE,
-                        event_version=CUSTOMER_UPDATE_EVENT_VERSION,
-                        handoff_status=update_receipt["status"],
-                        jira_result=update_receipt.get("jira_result"),
-                    )
-                except Exception:
-                    update_customer_case_update_status(
-                        case_update["update_reference"],
-                        "processed_handoff_pending",
-                        "The Jira update handoff did not complete.",
-                    )
-    except Exception:
-        for evidence_item in case_update["evidence"]:
-            evidence_item.pop("data", None)
-        update_customer_case_update_status(
-            case_update["update_reference"],
-            "processing_failed",
-            "The case update could not be fully prepared.",
-        )
-        case_update["processing_status"] = "processing_failed"
-    return case_update
-
-
 def process_customer_case_in_background(complaint):
     """Finish evidence, analysis, and handoff after the case is acknowledged."""
     try:
@@ -836,23 +760,6 @@ def render_customer_processing_wait():
     )
 
 
-@st.fragment(run_every=2)
-def render_customer_update_wait():
-    """Refresh only the update status while its form remains hidden."""
-    processing_future = st.session_state.get("customer_update_processing_future")
-    if processing_future is None:
-        st.rerun()
-    if processing_future.done():
-        st.session_state.customer_case_update = processing_future.result()
-        st.session_state.pop("customer_update_processing_future", None)
-        st.session_state.customer_intake_view = "update_success"
-        st.rerun()
-    with st.status("Adding information to the existing case…", expanded=True):
-        st.progress(65, text="Preparing evidence and updating the Jira case")
-        st.write("✓ Update received and form hidden")
-        st.write("⏳ Securing evidence and notifying the reviewing team")
-
-
 def render_incident_case(incident_case):
     """Lead with the workflow result and keep detailed analysis available."""
 
@@ -987,24 +894,13 @@ customer_intake_view = st.session_state.setdefault(
 
 if customer_intake_view == "landing":
     st.subheader("How can we help?")
-    st.markdown(
-        "Report a new delivery problem or add information and evidence to a "
-        "case you already reported."
+    st.markdown("Report a new delivery problem for human review.")
+    st.button(
+        "Report a new problem",
+        type="primary",
+        use_container_width=True,
+        on_click=start_customer_report,
     )
-    report_column, update_column = st.columns(2)
-    with report_column:
-        st.button(
-            "Report a new problem",
-            type="primary",
-            use_container_width=True,
-            on_click=start_customer_report,
-        )
-    with update_column:
-        st.button(
-            "Update an existing case",
-            use_container_width=True,
-            on_click=start_customer_update,
-        )
 
 elif customer_intake_view == "form":
     st.button(
@@ -1181,48 +1077,6 @@ elif customer_intake_view == "form":
             "Submit complaint", use_container_width=True
         )
 
-elif customer_intake_view == "update_form":
-    st.button(
-        "← Back to case options",
-        key="back_from_customer_update",
-        on_click=return_to_case_options,
-    )
-    st.subheader("Update an Existing Case")
-    st.markdown(
-        "Enter the case reference shown after your original report together "
-        "with the same parcel tracking number."
-    )
-    with st.form("customer_case_update_form", clear_on_submit=False):
-        update_case_reference = st.text_input(
-            "Case reference",
-            placeholder="For example, CASE-20260828-ABC123",
-            key="customer_update_case_reference",
-        )
-        update_tracking_number = st.text_input(
-            "Tracking number",
-            placeholder="Enter the tracking number from the original case",
-            key="customer_update_tracking_number",
-        )
-        update_information = st.text_area(
-            "Additional information",
-            placeholder="Explain what you want the reviewer to add to your case",
-            height=160,
-            key="customer_update_additional_information",
-        )
-        update_evidence_files = st.file_uploader(
-            "Additional evidence",
-            type=SUPPORTED_EVIDENCE_TYPES,
-            accept_multiple_files=True,
-            help=(
-                "Upload up to 10 new files (50 MB combined). Images: 10 MB "
-                "each. Documents: 20 MB each."
-            ),
-            key="customer_update_evidence_files",
-        )
-        case_update_submitted = st.form_submit_button(
-            "Add to existing case", use_container_width=True
-        )
-
 elif customer_intake_view == "processing":
     processing_complaint = st.session_state.get("customer_complaint")
     if processing_complaint:
@@ -1241,62 +1095,7 @@ elif customer_intake_view == "processing":
         st.rerun()
 
 elif customer_intake_view == "duplicate":
-    st.warning("A case is already open")
-    st.markdown(
-        "We have already received a report for this tracking number and "
-        "delivery problem. No duplicate case was created."
-    )
-    st.info(
-        "Use the case reference shown after your original submission to add "
-        "information or supporting evidence. The repeated report has been "
-        "recorded for the reviewing team."
-    )
-    st.button(
-        "Update the existing case",
-        type="primary",
-        use_container_width=True,
-        on_click=start_customer_update,
-    )
-
-elif customer_intake_view == "update_processing":
-    processing_update = st.session_state.get("customer_case_update")
-    if processing_update:
-        st.success("Additional information received")
-        st.markdown(
-            "Your update is being added to case "
-            f"**`{processing_update['case_reference']}`**."
-        )
-        st.info(
-            "Preparing the new information and evidence for the case reviewer. "
-            "This page will update automatically."
-        )
-        render_customer_update_wait()
-    else:
-        st.session_state.customer_intake_view = "landing"
-        st.rerun()
-
-elif customer_intake_view == "update_success":
-    submitted_update = st.session_state.get("customer_case_update")
-    if submitted_update:
-        st.success("Additional information received")
-        st.markdown(
-            "Your information has been received for case "
-            f"**`{submitted_update['case_reference']}`** and will be considered "
-            "during review."
-        )
-        if submitted_update.get("processing_status") == "processing_failed":
-            st.warning(
-                "The update is recorded, but its evidence is taking longer than "
-                "expected to prepare. Do not submit the same update again."
-            )
-        st.button(
-            "Return to case options",
-            use_container_width=True,
-            on_click=lambda: st.session_state.update(customer_intake_view="landing"),
-        )
-    else:
-        st.session_state.customer_intake_view = "landing"
-        st.rerun()
+    st.warning(DUPLICATE_CASE_MESSAGE)
 
 else:
     submitted_complaint = st.session_state.get("customer_complaint")
@@ -1523,49 +1322,6 @@ if customer_intake_view == "form" and complaint_submitted:
             )
             st.session_state.reset_customer_form_on_rerun = True
             st.session_state.customer_intake_view = "success"
-            st.rerun()
-
-if customer_intake_view == "update_form" and case_update_submitted:
-    validation_errors = validate_case_update(
-        update_case_reference,
-        update_tracking_number,
-        update_information,
-        update_evidence_files,
-    )
-    if validation_errors:
-        for validation_error in validation_errors:
-            st.error(validation_error)
-    else:
-        case_update = build_customer_case_update(
-            update_case_reference,
-            update_tracking_number,
-            update_information,
-            update_evidence_files,
-        )
-        update_lookup_failed = False
-        try:
-            case_update_id = create_customer_case_update(case_update)
-        except Exception:
-            case_update_id = None
-            update_lookup_failed = True
-            st.error(
-                "We could not verify the case right now. Please try again later."
-            )
-        if case_update_id is None and not update_lookup_failed:
-            st.error(
-                "The case reference and tracking number did not match an active "
-                "case. Check both values and try again."
-            )
-        elif case_update_id is not None:
-            st.session_state.customer_case_update = case_update
-            st.session_state.customer_update_processing_future = (
-                get_customer_processing_executor().submit(
-                    complete_customer_case_update_processing,
-                    copy.deepcopy(case_update),
-                )
-            )
-            st.session_state.reset_customer_form_on_rerun = True
-            st.session_state.customer_intake_view = "update_processing"
             st.rerun()
 
 if customer_intake_view == "processing":

@@ -8,6 +8,10 @@ from uuid import uuid4
 SUPPORTED_EVIDENCE_TYPES = ["pdf", "txt", "docx", "jpg", "jpeg", "png"]
 IMAGE_EVIDENCE_TYPES = {"jpg", "jpeg", "png"}
 CONFIGURED_CARRIER = "NorthStar Parcel"
+DUPLICATE_CASE_MESSAGE = (
+    "A case has already been opened for this tracking ID. Please wait for updates "
+    "while we investigate."
+)
 SUPPORTED_COUNTRIES = ["Germany", "France"]
 MAX_EVIDENCE_FILES = 10
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
@@ -178,7 +182,7 @@ def recommend_late_delivery_fee_review(delay_days, policy_exclusions):
 
 
 def validate_evidence_files(evidence_files):
-    """Validate shared evidence limits for new cases and case updates."""
+    """Validate evidence limits for new cases."""
     errors = []
     evidence_files = list(evidence_files or [])
     if len(evidence_files) > MAX_EVIDENCE_FILES:
@@ -203,21 +207,6 @@ def validate_evidence_files(evidence_files):
     if total_size > MAX_TOTAL_EVIDENCE_BYTES:
         errors.append("Combined evidence must not exceed 50 MB.")
 
-    return errors
-
-
-def validate_case_update(
-    case_reference, tracking_number, additional_information, evidence_files
-):
-    """Validate credentials and content supplied for an existing-case update."""
-    errors = []
-    if not case_reference.strip():
-        errors.append("Enter your case reference.")
-    if not tracking_number.strip():
-        errors.append("Enter your tracking number.")
-    if not additional_information.strip() and not list(evidence_files or []):
-        errors.append("Add information or upload at least one evidence file.")
-    errors.extend(validate_evidence_files(evidence_files))
     return errors
 
 
@@ -291,17 +280,3 @@ def build_customer_complaint(
         "downstream_processing_status": "not_connected",
     }
     return complaint
-
-
-def build_customer_case_update(
-    case_reference, tracking_number, additional_information, evidence_files
-):
-    """Create a normalized update contract for one existing customer case."""
-    return {
-        "update_reference": f"UPDATE-{uuid4().hex[:12].upper()}",
-        "case_reference": case_reference.strip().upper(),
-        "tracking_number": tracking_number.strip(),
-        "additional_information": additional_information.strip(),
-        "evidence": normalize_evidence_files(evidence_files),
-        "processing_status": "pending",
-    }

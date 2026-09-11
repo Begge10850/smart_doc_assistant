@@ -133,6 +133,7 @@ migrations/004_customer_case_schema_cleanup.sql
 migrations/005_customer_case_updates.sql
 migrations/006_complaint_specific_intake.sql
 migrations/007_policy_chunks.sql
+migrations/008_shipment_duplicate_lookup.sql
 ```
 
 Then refresh the semantic policy index and start the app:
@@ -157,12 +158,17 @@ connects `workflow_results` directly to it, removes the obsolete empty
 column. It refuses to drop `incident_cases` or detach unmatched workflow rows
 when legacy data is present, so that data must be reviewed first.
 
-Migration 005 prevents more than one active case for the same tracking number
-and complaint type, records repeat
-submission attempts for employees, and lets customers add information or new
-evidence to an existing case using its case reference and tracking number. A
-case update is designed to become a comment/attachment update on the original
-Jira issue rather than a second Jira ticket.
+Migration 005 adds durable duplicate-attempt records. Migration 008 adds the
+shipment-level unique index used to detect an active case by carrier and the
+normalized tracking-number key `lower(trim(tracking_number))`.
+
+The Make scenario must use that same normalized tracking-number value as its
+Data Store key for both lookup and save. The new-case route is the lookup's
+false route; the duplicate route is its true route and must terminate before
+Jira. Data Store 26 belongs after successful Jira creation and must save the
+normalized key together with the Jira issue key. Any older Data Store records
+keyed by `event_id` must be migrated or removed in Make before this contract is
+reliable; that remote cleanup is not performed by this repository.
 
 After applying migration 003, run `python index_policies.py` once in the project
 environment, and repeat it whenever policy text changes. It refreshes policy
@@ -190,9 +196,8 @@ Demo checklist:
 4. Confirm Make returns an accepted receipt and, when configured, an allow-listed
    Jira result with an issue key/link.
 5. Ask a question about an uploaded text document to trigger grounded vector Q&A.
-6. Resubmit the same active tracking-number/problem and confirm it is treated as
-   a duplicate; add information using the existing case reference and confirm the
-   original Jira issue is targeted.
+6. Resubmit the same active tracking number with different casing or surrounding
+   spaces and confirm it terminates as a duplicate before Jira creation.
 
 Known MVP limitations: the carrier policies are fictional; only NorthStar is
 exposed in customer intake; external S3/OpenAI/Make/Jira behavior requires valid
