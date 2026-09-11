@@ -13,6 +13,13 @@ from embedding_config import validate_embedding_dimension
 load_dotenv()
 
 
+ACTIVE_SHIPMENT_UNIQUE_INDEX = "customer_cases_one_active_shipment_uidx"
+
+
+class DuplicateActiveShipmentError(RuntimeError):
+    """Raised when another active case already owns the normalized shipment key."""
+
+
 def get_database_url():
     """Return the configured PostgreSQL connection URL."""
 
@@ -68,29 +75,34 @@ def create_customer_case(complaint):
         returning id;
     """
 
-    with psycopg.connect(get_database_url()) as connection:
-        with connection.cursor() as cursor:
-            params = dict(complaint)
-            params["complaint_details"] = psycopg.types.json.Jsonb(
-                complaint.get("complaint_details", {})
-            )
-            params["evidence_types"] = psycopg.types.json.Jsonb(
-                complaint.get("evidence_types", [])
-            )
-            cursor.execute(case_query, params)
-            customer_case_id = cursor.fetchone()[0]
-            for evidence in complaint["evidence"]:
-                cursor.execute(
-                    evidence_query,
-                    (
-                        customer_case_id,
-                        evidence["file_name"],
-                        evidence.get("content_type"),
-                        evidence["size_bytes"],
-                    ),
+    try:
+        with psycopg.connect(get_database_url()) as connection:
+            with connection.cursor() as cursor:
+                params = dict(complaint)
+                params["complaint_details"] = psycopg.types.json.Jsonb(
+                    complaint.get("complaint_details", {})
                 )
-                evidence["evidence_id"] = cursor.fetchone()[0]
-        connection.commit()
+                params["evidence_types"] = psycopg.types.json.Jsonb(
+                    complaint.get("evidence_types", [])
+                )
+                cursor.execute(case_query, params)
+                customer_case_id = cursor.fetchone()[0]
+                for evidence in complaint["evidence"]:
+                    cursor.execute(
+                        evidence_query,
+                        (
+                            customer_case_id,
+                            evidence["file_name"],
+                            evidence.get("content_type"),
+                            evidence["size_bytes"],
+                        ),
+                    )
+                    evidence["evidence_id"] = cursor.fetchone()[0]
+            connection.commit()
+    except psycopg.errors.UniqueViolation as exc:
+        if getattr(exc.diag, "constraint_name", None) == ACTIVE_SHIPMENT_UNIQUE_INDEX:
+            raise DuplicateActiveShipmentError from exc
+        raise
 
     complaint["customer_case_id"] = customer_case_id
     return customer_case_id

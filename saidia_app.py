@@ -49,6 +49,7 @@ from s3_upload import (
 from embedding_config import EMBEDDING_MODEL
 from vector_store import chunk_text, embed_chunks
 from database import (
+    DuplicateActiveShipmentError,
     create_customer_case,
     document_has_embeddings,
     find_active_customer_case,
@@ -1305,7 +1306,18 @@ if customer_intake_view == "form" and complaint_submitted:
             update_customer_case_status(
                 complaint["case_reference"], "processing_evidence"
             )
-        except Exception as exc:
+        except DuplicateActiveShipmentError:
+            existing_case = find_active_customer_case(
+                tracking_number, CONFIGURED_CARRIER
+            )
+            if existing_case:
+                record_duplicate_submission_attempt(
+                    existing_case["case_reference"]
+                )
+            st.session_state.reset_customer_form_on_rerun = True
+            st.session_state.customer_intake_view = "duplicate"
+            st.rerun()
+        except Exception:
             for evidence_item in complaint["evidence"]:
                 evidence_item.pop("data", None)
             st.error(
