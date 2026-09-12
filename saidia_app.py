@@ -1097,6 +1097,13 @@ elif customer_intake_view == "processing":
 
 elif customer_intake_view == "duplicate":
     st.warning(DUPLICATE_CASE_MESSAGE)
+    st.button(
+        "Return to homepage",
+        type="primary",
+        use_container_width=True,
+        on_click=return_to_case_options,
+        key="duplicate_return_to_homepage",
+    )
 
 else:
     submitted_complaint = st.session_state.get("customer_complaint")
