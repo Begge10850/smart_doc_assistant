@@ -191,15 +191,20 @@ def _policy_assessment(
             reported_on_time = reported_date <= deadline
 
     if missing_evidence:
-        supplied_text = ", ".join(cleaned for cleaned in required_evidence if cleaned not in missing_evidence)
-        missing_text = ", ".join(missing_evidence)
         action = (
-            f"Evidence recorded: {supplied_text or 'none of the required items'}. "
-            f"Request from the complainant: {missing_text}. "
-            "Obtain the missing evidence before completing the claim "
-            "review. The reviewer should also check filing timeliness and any "
-            "documented exception before deciding the next operational step."
+            "Request the missing required evidence from the complainant before "
+            "completing the claim review."
         )
+        if reported_on_time is False:
+            action += (
+                " The report was submitted after the calculated deadline; determine "
+                "whether a documented late-filing exception applies."
+            )
+        elif reported_on_time is None:
+            action += (
+                " Reporting timeliness could not be determined; verify the relevant "
+                "dates."
+            )
     elif reported_on_time is False:
         action = (
             "The listed policy evidence appears complete, but the report was made "

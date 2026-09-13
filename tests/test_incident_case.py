@@ -113,5 +113,23 @@ class IncidentCaseTests(unittest.TestCase):
         self.assertIn("after the calculated reporting deadline", incident_case.recommended_next_action)
         self.assertNotIn("Request the missing", incident_case.recommended_next_action)
 
+    def test_missing_evidence_recommendation_does_not_repeat_assessment(self):
+        incident_case = build_incident_case(
+            FACTS,
+            source_file="missing-evidence.pdf",
+            source_document_hash="missing-evidence",
+            policy_result=POLICY_RESULT,
+        )
+
+        self.assertTrue(incident_case.reported_on_time)
+        self.assertTrue(incident_case.missing_required_evidence)
+        self.assertEqual(
+            incident_case.recommended_next_action,
+            "Request the missing required evidence from the complainant before "
+            "completing the claim review.",
+        )
+        self.assertNotIn("Evidence recorded", incident_case.recommended_next_action)
+        self.assertNotIn("filing timeliness", incident_case.recommended_next_action)
+
 if __name__ == "__main__":
     unittest.main()
