@@ -339,6 +339,59 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(tool_outputs[0]["call_id"], "call-search-1")
         self.assertIn("Aggressive 63 0 25", tool_outputs[0]["output"])
 
+    def test_customer_case_answer_prompt_requires_direct_relevant_language(self):
+        captured_request = {}
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                captured_request.update(copy.deepcopy(kwargs))
+                return types.SimpleNamespace(
+                    output_text=(
+                        "No. A photograph of the external packaging is still missing."
+                    )
+                )
+
+        fake_client = types.SimpleNamespace(responses=FakeResponses())
+        complaint = {
+            "case_reference": "CASE-001",
+            "tracking_number": "TRACK-001",
+            "complaint_type": "parcel_damage",
+            "evidence_types": ["damage_photo", "proof_of_value"],
+            "evidence": [],
+        }
+        analysis = {
+            "required_evidence": [
+                "photograph of the damaged item",
+                "commercial invoice or other proof of value",
+                "photograph of the external packaging",
+            ],
+            "missing_required_evidence": [
+                "photograph of the external packaging"
+            ],
+        }
+
+        with patch.object(
+            agent_engine,
+            "_read_openai_settings",
+            return_value=("test-key", "test-model"),
+        ), patch.object(agent_engine, "OpenAI", return_value=fake_client):
+            answer = agent_engine.answer_customer_case_question(
+                "Did the reporter submit all required evidence?",
+                complaint=complaint,
+                analysis=analysis,
+            )
+
+        self.assertEqual(
+            answer,
+            "No. A photograph of the external packaging is still missing.",
+        )
+        instructions = captured_request["instructions"]
+        self.assertIn("Answer the employee's exact question directly", instructions)
+        self.assertIn("Use a short paragraph by default", instructions)
+        self.assertIn("answer yes or no first", instructions)
+        self.assertIn("only when the question asks", instructions)
+        self.assertEqual(captured_request["max_output_tokens"], 400)
+
 
 if __name__ == "__main__":
     unittest.main()
