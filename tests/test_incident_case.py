@@ -110,7 +110,10 @@ class IncidentCaseTests(unittest.TestCase):
         self.assertEqual(incident_case.missing_required_evidence, [])
         self.assertFalse(incident_case.reported_on_time)
         self.assertIn("evidence appears complete", incident_case.recommended_next_action)
-        self.assertIn("after the calculated reporting deadline", incident_case.recommended_next_action)
+        self.assertIn(
+            "submitted 4 days after the 2026-08-16 deadline",
+            incident_case.recommended_next_action,
+        )
         self.assertNotIn("Request the missing", incident_case.recommended_next_action)
 
     def test_missing_evidence_recommendation_does_not_repeat_assessment(self):
@@ -130,6 +133,25 @@ class IncidentCaseTests(unittest.TestCase):
         )
         self.assertNotIn("Evidence recorded", incident_case.recommended_next_action)
         self.assertNotIn("filing timeliness", incident_case.recommended_next_action)
+
+    def test_late_missing_evidence_recommendation_includes_exact_delay(self):
+        facts = dict(FACTS)
+        facts["reported_date"] = "2026-08-21"
+        incident_case = build_incident_case(
+            facts,
+            source_file="late-missing-evidence.pdf",
+            source_document_hash="late-missing-evidence",
+            policy_result=POLICY_RESULT,
+        )
+
+        self.assertFalse(incident_case.reported_on_time)
+        self.assertEqual(
+            incident_case.recommended_next_action,
+            "Request the missing required evidence from the complainant before "
+            "completing the claim review. The report was submitted 5 days after "
+            "the 2026-08-16 deadline; determine whether a documented late-filing "
+            "exception applies.",
+        )
 
 if __name__ == "__main__":
     unittest.main()

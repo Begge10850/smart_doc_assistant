@@ -184,11 +184,22 @@ def _policy_assessment(
     reporting_window = policy.get("reporting_window_days")
     claim_deadline = None
     reported_on_time = None
+    days_late = None
     if delivery_date and isinstance(reporting_window, int):
         deadline = delivery_date + timedelta(days=reporting_window)
         claim_deadline = deadline.isoformat()
         if reported_date:
             reported_on_time = reported_date <= deadline
+            if not reported_on_time:
+                days_late = (reported_date - deadline).days
+
+    late_filing_text = None
+    if days_late is not None and claim_deadline:
+        day_label = "day" if days_late == 1 else "days"
+        late_filing_text = (
+            f"The report was submitted {days_late} {day_label} after the "
+            f"{claim_deadline} deadline"
+        )
 
     if missing_evidence:
         action = (
@@ -197,7 +208,7 @@ def _policy_assessment(
         )
         if reported_on_time is False:
             action += (
-                " The report was submitted after the calculated deadline; determine "
+                f" {late_filing_text}; determine "
                 "whether a documented late-filing exception applies."
             )
         elif reported_on_time is None:
@@ -207,8 +218,8 @@ def _policy_assessment(
             )
     elif reported_on_time is False:
         action = (
-            "The listed policy evidence appears complete, but the report was made "
-            "after the calculated reporting deadline. Check whether a documented "
+            f"The listed policy evidence appears complete, but {late_filing_text.lower()}. "
+            "Check whether a documented "
             "late-filing exception applies before completing the claim review."
         )
     elif reported_on_time is True:
