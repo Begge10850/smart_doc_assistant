@@ -1,231 +1,149 @@
-# 📄 Saidia Smart Document Assistant
+# Saidia Logistics Claims
 
-Saidia is a GPT-powered complaint-preparation assistant for a fictional parcel carrier. It evaluates logistics incidents against carrier policies and supports document-grounded questions in a private web app.
+Saidia is a fictional internal claims assistant for NorthStar Parcel. It turns a customer delivery report into a structured case, applies versioned policy rules, explains the assessment in plain language, and creates a Jira ticket for human review.
 
-Saidia is intentionally a single-organisation, single-carrier MVP. The carrier is not a customer-selectable tenant or workspace.
+[Open the live application](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
 
-The customer-facing MVP is intentionally configured for the fictional
-`NorthStar Parcel` carrier in Germany and France. The underlying data model can
-support additional carriers, but they must not be exposed until their policies
-are added and evaluated.
+NorthStar Parcel and its policies are fictional. Saidia supports operational review only. It does not approve or deny claims, assign liability, or authorize refunds.
 
-👉 **Try the live app here:** [Launch Saidia Smart Assistant](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
+## What the system does
 
-## ⚠️ Warning
+- Presents conditional forms for damaged, lost, late, partial-loss, delivered-but-not-received, and other delivery problems.
+- Accepts incomplete submissions and identifies the evidence still required by the matching policy.
+- Stores original uploads privately in Amazon S3 and keeps evidence metadata in PostgreSQL.
+- Preserves images for human inspection. The application does not use computer vision or infer their contents.
+- Extracts and indexes supported text documents when they are supplied, making their text searchable during case Q&A.
+- Calculates filing deadlines and evidence completeness with deterministic Python and PostgreSQL logic.
+- Retrieves relevant policy passages with semantic search and uses an LLM to explain verified results in plain language.
+- Sends new cases and temporary evidence links to Make, which creates a Jira issue and attaches the evidence.
+- Returns the Jira issue details to Streamlit and provides grounded case Q&A for employees.
+- Detects an existing active case before another Jira issue is created and returns its case reference to the customer.
 
-- Please do not use documents that have sensitive data when trying to use the application as the documents uploaded in the application are store in my AWS S3 bucket.
+## How a claim moves through Saidia
 
-![Saidia Smart Assistant Home Page](Images/home_page.PNG)
+1. A customer selects a delivery problem and submits the relevant case details and any available evidence.
+2. Saidia creates the case in PostgreSQL and stores uploaded files in a private S3 bucket.
+3. Structured policy logic matches the NorthStar policy by problem type and country, calculates the filing deadline, and compares required evidence with the customer's declaration.
+4. Policy embeddings stored with pgvector retrieve relevant passages for the explanation and later Q&A.
+5. Saidia sends the prepared case to a Make webhook. Make checks the shared normalized tracking key before entering the new-case route.
+6. For a new claim, Make creates the Jira issue, transfers the evidence attachments, stores the Jira key, and returns the result to Streamlit.
+7. For a duplicate, Make stops before Jira creation and returns the existing case reference.
+8. An employee reviews the case and makes every final decision.
 
-![Saidia Smart Assistant App in action](Images/app_in_action.PNG)
+## Architecture
 
-![Saidia Smart Assistant App results](Images/result.PNG)
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Customer and reviewer interface | Python, Streamlit | Conditional intake, progress states, results, duplicate response, and case Q&A |
+| Relational data and constraints | PostgreSQL on Supabase | Cases, evidence metadata, policies, workflow results, transactions, and active-shipment uniqueness |
+| Semantic retrieval | pgvector, `all-mpnet-base-v2` | 768-dimensional embeddings and similarity search over policy text and supported text evidence |
+| Grounded language layer | OpenAI API | Plain-language policy explanations and concise case answers based on supplied context |
+| Evidence storage | Private Amazon S3 | Original file storage and short-lived download links for the Jira handoff |
+| Workflow automation | Make | Duplicate routing, Jira creation, attachment transfer, result recording, and webhook responses |
+| Review queue | Jira | Operational ticket, case details, policy assessment, evidence status, attachments, and human ownership |
 
----
+PostgreSQL was chosen because the workflow needs relational integrity, transactions, and database constraints, not only flexible object storage. pgvector keeps semantic retrieval beside the case and policy data instead of adding a separate vector database. The sentence-transformer model provides reproducible local embeddings suited to a small, focused policy library. The LLM is used only where language is useful. Authoritative deadlines, evidence requirements, and duplicate constraints remain deterministic.
 
-## 🚀 Features
+## Reliability and safety controls
 
-- 🔒 **Secure Document Upload** — Files are stored in AWS S3 bucket
-- 🧠 **AI-Powered Q&A** — Uses OpenAI's GPT to answer questions about uploaded documents
-- 📄 **Supported File Types** — PDF, DOCX, TXT, JPG, JPEG, and PNG
-- 🧾 **Adaptive Text Extraction** — Uses local extraction for digital documents and OpenAI Vision only as an OCR fallback for scanned text documents
-- ⚡ **Concurrent First-Pass Processing** — Extracts directly from the original upload while S3 storage runs in parallel, avoiding an immediate S3 re-download
-- 🧠 **Semantic Chunking & Embedding** — Text is chunked and embedded using `all-mpnet-base-v2`
-- 🔍 **Vector Search** — Uses PostgreSQL with pgvector to retrieve relevant context for question answering
-- 🧰 **Agentic Tool Selection** — An OpenAI function-calling controller chooses when to inspect document metadata or search indexed content
-- 📚 **Carrier Policy Retrieval** — The agent can compare incidents with a small, clearly labelled fictional evaluation-policy store
-- 📋 **Structured Incident Cases** — Converts document facts into a validated case contract and applies deterministic policy, evidence, and deadline checks
-- 🛡️ **Incident Relevance Gate** — Keeps unrelated documents available for preview and chat without creating Make, Sheets, or Jira records
-- 🔗 **One-Click Automatic Case Handoff** — Processing a document also analyzes its incident and sends the validated, versioned case to Make.com; operational human handling belongs in Jira
-- 🗄️ **PostgreSQL Persistence** — Persists real processed-document metadata in hosted Supabase PostgreSQL via `DATABASE_URL`
-- ☁️ **Streamlit Cloud Ready** — Fully deployed on Streamlit
+### Duplicate protection
 
----
+The application and Make use the same `tracking_number_key`. Make checks that key before routing, sends `Exists = false` to the new-case path, and sends `Exists = true` to the duplicate response. The duplicate route terminates before Jira.
 
-## 💼 Product Scope
+Migration `008_shipment_duplicate_lookup.sql` adds the database-level safeguard: only one active case may exist for a normalized carrier and tracking-number pair. This protects the workflow when requests arrive close together and an application-only check is not enough.
 
-Saidia's MVP supports one internal organisation handling:
+Make Data Store module 26 writes the processed record only after Jira creation and includes the Jira issue key. Older records keyed by event ID are legacy data and must not be treated as shipment lookup records.
 
-- many logistics incidents;
-- one configured fictional carrier, `NorthStar Parcel`;
-- policies by supported country and incident type;
-- structured case handoff for human operational review.
+### Evidence handling
 
-The data model can be extended to additional carriers later, but the customer
-form does not expose a carrier selector while only NorthStar policies have been
-implemented and tested.
+- Original files remain private in S3.
+- Make receives time-limited download links only for attachment transfer.
+- Images remain unchanged and are reserved for human inspection.
+- File declarations are compared with policy requirements, but a declaration is not treated as proof that an image or document says something.
+- Claims can proceed with missing evidence so a reviewer can request it.
 
----
+### Decision boundary
 
-## 🔧 Tech Stack
+Structured rules are authoritative for policy matching, deadlines, and evidence requirements. Retrieval supplies relevant context to the LLM, but the model does not make the claim decision. A human reviewer always retains final authority.
 
-| Tool                  | Purpose                             |
-|-----------------------|-------------------------------------|
-| `streamlit`           | Frontend UI                         |
-| `boto3`               | AWS S3 storage                      |
-| `pdfplumber`, `docx`, `PyMuPDF` | Text, annotation, image, and scanned-PDF preparation |
-| `sentence-transformers` | Text embeddings                   |
-| `pgvector`            | PostgreSQL vector search            |
-| `openai`              | Document Q&A, agent tool selection, and automatic vision transcription |
-| `psycopg`             | PostgreSQL document persistence        |
-| `python-dotenv`       | Local environment setup (optional)  |
+## Local setup
 
----
+### Requirements
 
-## 📦 Folder Structure
-.
-| saidia_app.py         | Main Streamlit app                   |
-|-----------------------|--------------------------------------|
-| customer_intake.py    | Pure complaint validation and normalization |
-| rag_pipeline.py       | Inspects files and selects local or vision extraction |
-| s3_upload.py          | Uploads file to AWS S3               |
-| vector_store.py       | Document chunking and embedding      |
-| qa_engine.py          | GPT Q&A engine                       |
-| agent_engine.py       | Bounded read-only document agent and tool controller |
-| policy_store.py       | Read-only fictional carrier-policy lookup |
-| vision_engine.py      | Automatic OpenAI image transcription |
-| incident_case.py      | Structured case validation and deterministic policy analysis |
-| case_handoff.py       | Versioned processed-case handoff to Make |
-| database.py           | PostgreSQL document persistence       |
-| requirements.txt      | .streamlit/-secrets.toml-Private Keys|
+- Python 3.11 or later
+- PostgreSQL with the `vector` extension
+- A private S3 bucket
+- An OpenAI API key
+- A Make webhook connected to Jira
 
-📌 Notes
-- For digital documents, only retrieved document chunks are sent to OpenAI when answering questions.
-
-- Customer evidence photographs are stored unchanged in private S3 for human review and are not interpreted by AI. Rendered pages from scanned text documents may be sent to OpenAI Vision only when usable native text is unavailable; the app displays this OCR routing clearly.
-
-- Original uploads are stored in a private AWS S3 bucket; selected document content is processed by OpenAI as described above.
-
-- The agent can inspect metadata, search already-processed content, and read fictional evaluation policies. Its tools cannot modify files, delete objects, send messages, or perform external actions.
-
-- Selecting **Process Document** performs extraction, PostgreSQL persistence, incident analysis, and Make handoff in one workflow. Extraction uses the original uploaded bytes while S3 upload runs concurrently; semantic embeddings are deferred until the first chat question so they do not delay the Jira result. Streamlit leads with the Jira result, keeps detailed case analysis collapsed for inspection, and does not approve or reject cases locally.
-
-- Make may return a JSON `jira_result` containing `issue_key`, `title`, `routing`, `status`, `recommended_action`, and optional `jira_url`. Streamlit displays these recruiter-friendly fields without requiring Jira access. Until the external Make scenario returns that JSON, the app displays a successful handoff receipt only.
-
-## 🔑 API Access Keys Required for the application.
-
-##  [aws]
-- AWS_ACCESS_KEY_ID = "your_aws_access_key"
-- AWS_SECRET_ACCESS_KEY = "your_aws_secret"
-
-## [openai]
-- OPENAI_API_KEY = "your_openai_api_key"
-- QA_MODEL = "gpt-5.6-sol" # optional override
-- VISION_MODEL = "gpt-5.6-sol" # optional override
-
-## [make]
-- WEBHOOK_URL = "https://hook.example.make.com/your_private_webhook" # keep private
-- ENABLE_CUSTOMER_CASE_HANDOFF = "false" # enable only after mapping the v1 customer event in Make
-
-## Database
-- DATABASE_URL = "postgresql://..." # hosted PostgreSQL connection string; keep private
-
-Use Python 3.10 or newer. Create an isolated environment, install dependencies,
-then apply every SQL file in `migrations/` in filename order to the same database.
-The complete order is:
-
-```text
-migrations/000_core_schema.sql
-migrations/001_customer_cases.sql
-migrations/002_case_processing_metrics.sql
-migrations/003_northstar_complaint_policies.sql
-migrations/004_customer_case_schema_cleanup.sql
-migrations/005_customer_case_updates.sql
-migrations/006_complaint_specific_intake.sql
-migrations/007_policy_chunks.sql
-migrations/008_shipment_duplicate_lookup.sql
-```
-
-Then refresh the semantic policy index and start the app:
+Install the Python dependencies:
 
 ```bash
-python index_policies.py
-streamlit run saidia_app.py
+python3 -m pip install -r requirements.txt
 ```
 
-`all-mpnet-base-v2` produces 768-dimensional embeddings. Both
-`document_chunks.embedding` and `policy_chunks.embedding` are therefore
-`vector(768)`; application writes and searches reject any other dimension.
+Provide secrets through environment variables or Streamlit secrets. Do not commit real credentials.
 
-These create durable customer-case, evidence, grounded-analysis, lifecycle,
-processing-metric, and fictional NorthStar policy records. Original file bodies remain in private S3;
-PostgreSQL stores case data, private S3 object keys, document relationships,
-processing status, grounded case analysis, and privacy-safe stage timings.
+```toml
+DATABASE_URL = "postgresql://..."
 
-Migration 004 makes `customer_cases` the single operational case source,
-connects `workflow_results` directly to it, removes the obsolete empty
-`incident_cases` table, and removes the unused customer-photo observation
-column. It refuses to drop `incident_cases` or detach unmatched workflow rows
-when legacy data is present, so that data must be reviewed first.
+[aws]
+AWS_ACCESS_KEY_ID = "..."
+AWS_SECRET_ACCESS_KEY = "..."
 
-Migration 005 adds durable duplicate-attempt records. Migration 008 adds the
-shipment-level unique index used to detect an active case by carrier and the
-normalized tracking-number key `lower(trim(tracking_number))`.
+[openai]
+OPENAI_API_KEY = "..."
 
-The Make scenario must use that same normalized tracking-number value as its
-Data Store key for both lookup and save. The new-case route is the lookup's
-false route; the duplicate route is its true route and must terminate before
-Jira. Data Store 26 belongs after successful Jira creation and must save the
-normalized key together with the Jira issue key. Any older Data Store records
-keyed by `event_id` must be migrated or removed in Make before this contract is
-reliable; that remote cleanup is not performed by this repository.
-
-After applying migration 003, run `python index_policies.py` once in the project
-environment, and repeat it whenever policy text changes. It refreshes policy
-chunks so semantic retrieval can support explanations. Structured fields in
-`carrier_policies` remain authoritative: matching is deterministic by explicit
-carrier (including an allow-listed alias), country, and complaint type, and
-deadline/evidence calculations never depend on vector similarity.
-
-## MVP architecture and demo
-
-Customer intake validates complaint-specific facts and blocks duplicate active
-cases. Original evidence is uploaded under a private, case-scoped S3 key; only
-metadata and object keys are stored in PostgreSQL. Text documents are extracted,
-persisted, and embedded lazily for grounded Q&A, while photographs remain
-unchanged for human inspection. Saidia prepares a non-binding analysis from
-structured policies, then sends an idempotent event and short-lived evidence
-links to Make for Jira. Jira/human review owns the final decision.
-
-Demo checklist:
-
-1. Submit a supported NorthStar complaint with required fields and evidence.
-2. Confirm a case reference and private evidence processing status appear.
-3. Confirm structured policy guidance, missing evidence, and timing are shown as
-   preparation—not approval or denial.
-4. Confirm Make returns an accepted receipt and, when configured, an allow-listed
-   Jira result with an issue key/link.
-5. Ask a question about an uploaded text document to trigger grounded vector Q&A.
-6. Resubmit the same active tracking number with different casing or surrounding
-   spaces and confirm it terminates as a duplicate before Jira creation.
-
-Known MVP limitations: the carrier policies are fictional; only NorthStar is
-exposed in customer intake; external S3/OpenAI/Make/Jira behavior requires valid
-private credentials and a mapped Make scenario; there is no employee dashboard;
-and automated tests mock external writes rather than creating real Jira issues.
-
-Example performance query:
-
-```sql
-select
-    c.case_reference,
-    e.stage,
-    e.duration_ms,
-    e.status,
-    e.created_at
-from case_processing_events e
-join customer_cases c on c.id = e.customer_case_id
-order by e.created_at desc;
+[make]
+WEBHOOK_URL = "https://hook.eu1.make.com/..."
+ENABLE_CUSTOMER_CASE_HANDOFF = true
 ```
 
-Customer evidence limits are 10 files, 10 MB per image, 20 MB per document,
-and 50 MB combined per complaint.
+Apply the SQL migrations in `migrations/` in numerical order, then index the policy library and start Streamlit:
 
-## 🙌 Credits
-- Created by Treva Ogwang
-- Powered by OpenAI + Streamlit + AWS
+```bash
+python3 index_policies.py
+python3 -m streamlit run saidia_app.py
+```
 
-## ⚖️ License
-This project is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0).
+The default Q&A model can be changed with `OPENAI_QA_MODEL`. The application defaults to `gpt-5.6-sol` when no override is provided.
 
-You may not sell, alter, or use this work commercially without explicit permission from the author.
+## Make scenario contract
+
+The current new-claim scenario follows this order:
+
+```text
+Webhook 2
+  -> Data Store 7: check tracking_number_key
+  -> Router 8
+      -> new claim: Jira 16 -> attachments 20/23/24/25 -> Data Store 26 -> Webhook 40
+      -> duplicate: Webhook 30 and stop
+```
+
+The incoming payload includes `case.tracking_number_key`. Both Data Store modules 7 and 26 must map their key directly to that field. The successful response returns the Jira result and case assessment. The duplicate response returns the exact customer message and, when available, the existing case reference.
+
+## Tests
+
+Run the automated suite with:
+
+```bash
+python3 -m pytest -q
+```
+
+Production smoke testing should confirm two paths with a new tracking number:
+
+1. The first submission creates one Jira issue, transfers its evidence, records the Jira key, and returns the result.
+2. A second submission using the same normalized tracking key returns the duplicate message and original case reference without creating another Jira issue.
+
+## Current scope
+
+- Carrier: fictional NorthStar Parcel
+- Countries: France and Germany
+- Interface: Streamlit web application
+- Human review: mandatory for every claim
+- Image understanding: not implemented
+- External tracking verification: not implemented
+
+## License
+
+This project is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International license. See [LICENSE](LICENSE).
