@@ -135,6 +135,7 @@ def start_customer_report():
     st.session_state.pop("customer_case_handoff_receipt", None)
     st.session_state.pop("customer_case_chat_messages", None)
     st.session_state.pop("customer_processing_future", None)
+    st.session_state.pop("duplicate_case_reference", None)
     st.session_state.customer_intake_view = "form"
 
 
@@ -144,6 +145,7 @@ def return_to_case_options():
     st.session_state.pop("customer_complaint", None)
     st.session_state.pop("customer_case_chat_messages", None)
     st.session_state.pop("customer_processing_future", None)
+    st.session_state.pop("duplicate_case_reference", None)
     st.session_state.customer_intake_view = "landing"
 
 def run_customer_stage(
@@ -1097,6 +1099,13 @@ elif customer_intake_view == "processing":
 
 elif customer_intake_view == "duplicate":
     st.warning(DUPLICATE_CASE_MESSAGE)
+    duplicate_case_reference = st.session_state.get("duplicate_case_reference")
+    if duplicate_case_reference:
+        st.markdown(
+            "Your existing case reference is "
+            f"**`{duplicate_case_reference}`**. Keep this reference for future "
+            "correspondence."
+        )
     st.button(
         "Return to homepage",
         type="primary",
@@ -1281,6 +1290,9 @@ if customer_intake_view == "form" and complaint_submitted:
             record_duplicate_submission_attempt(
                 existing_case["case_reference"]
             )
+            st.session_state.duplicate_case_reference = existing_case[
+                "case_reference"
+            ]
             st.session_state.reset_customer_form_on_rerun = True
             st.session_state.customer_intake_view = "duplicate"
             st.rerun()
@@ -1321,6 +1333,9 @@ if customer_intake_view == "form" and complaint_submitted:
                 record_duplicate_submission_attempt(
                     existing_case["case_reference"]
                 )
+                st.session_state.duplicate_case_reference = existing_case[
+                    "case_reference"
+                ]
             st.session_state.reset_customer_form_on_rerun = True
             st.session_state.customer_intake_view = "duplicate"
             st.rerun()
