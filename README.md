@@ -1,6 +1,6 @@
 # Saidia Logistics Claims
 
-Saidia is a fictional internal claims assistant for NorthStar Parcel. It turns a customer delivery report into a structured case, applies versioned policy rules, explains the assessment in plain language, and creates a Jira ticket for human review.
+Saidia is an internal claims assistant for NorthStar Parcel. It turns a customer delivery report into a structured case, applies versioned policy rules, explains the assessment in plain language, and creates a Jira ticket for human review.
 
 [Open the live application](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
 
