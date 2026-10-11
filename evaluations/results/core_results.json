@@ -1,0 +1,112 @@
+{
+  "evaluation": "Saidia five-case deterministic core evaluation",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "scope": "Structured policy matching, deadlines, missing evidence, unsupported policy handling, and the human-decision boundary.",
+  "not_measured": "Live embedding retrieval, live model tool choice, generated-answer quality, S3, Make, Jira, and production behavior.",
+  "results": [
+    {
+      "id": "damage-complete-on-time",
+      "description": "A damage report with every listed requirement represented.",
+      "passed": true,
+      "checks": {
+        "policy_match_status": true,
+        "policy_id": true,
+        "claim_deadline": true,
+        "reported_on_time": true,
+        "missing_required_evidence": true,
+        "human_decision_boundary": true
+      },
+      "actual": {
+        "policy_match_status": "matched",
+        "policy_id": "northstar-parcel-damage-eu-v1",
+        "claim_deadline": "2026-08-16",
+        "reported_on_time": true,
+        "missing_required_evidence": []
+      }
+    },
+    {
+      "id": "late-delivery-on-time",
+      "description": "A late-delivery report filed inside the fictional reporting window.",
+      "passed": true,
+      "checks": {
+        "policy_match_status": true,
+        "policy_id": true,
+        "claim_deadline": true,
+        "reported_on_time": true,
+        "missing_required_evidence": true,
+        "human_decision_boundary": true
+      },
+      "actual": {
+        "policy_match_status": "matched",
+        "policy_id": "northstar-late-delivery-eu-v1",
+        "claim_deadline": "2026-08-24",
+        "reported_on_time": true,
+        "missing_required_evidence": []
+      }
+    },
+    {
+      "id": "damage-missing-packaging-photo",
+      "description": "A valid damage report where one required photograph is missing.",
+      "passed": true,
+      "checks": {
+        "policy_match_status": true,
+        "policy_id": true,
+        "claim_deadline": true,
+        "reported_on_time": true,
+        "missing_required_evidence": true,
+        "human_decision_boundary": true
+      },
+      "actual": {
+        "policy_match_status": "matched",
+        "policy_id": "northstar-parcel-damage-eu-v1",
+        "claim_deadline": "2026-09-08",
+        "reported_on_time": true,
+        "missing_required_evidence": [
+          "photograph of the external packaging"
+        ]
+      }
+    },
+    {
+      "id": "unsupported-carrier",
+      "description": "No NorthStar policy may be applied to another carrier.",
+      "passed": true,
+      "checks": {
+        "policy_match_status": true,
+        "policy_id": true,
+        "claim_deadline": true,
+        "reported_on_time": true,
+        "missing_required_evidence": true,
+        "human_decision_boundary": true
+      },
+      "actual": {
+        "policy_match_status": "not_found",
+        "policy_id": null,
+        "claim_deadline": null,
+        "reported_on_time": null,
+        "missing_required_evidence": []
+      }
+    },
+    {
+      "id": "late-filing-needs-review",
+      "description": "A complete late-delivery report submitted after the calculated deadline.",
+      "passed": true,
+      "checks": {
+        "policy_match_status": true,
+        "policy_id": true,
+        "claim_deadline": true,
+        "reported_on_time": true,
+        "missing_required_evidence": true,
+        "human_decision_boundary": true
+      },
+      "actual": {
+        "policy_match_status": "matched",
+        "policy_id": "northstar-late-delivery-eu-v1",
+        "claim_deadline": "2026-08-15",
+        "reported_on_time": false,
+        "missing_required_evidence": []
+      }
+    }
+  ]
+}

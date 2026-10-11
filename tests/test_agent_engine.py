@@ -51,6 +51,20 @@ class ToolSchemaTests(unittest.TestCase):
             self.assertFalse(tool["parameters"]["additionalProperties"])
             self.assertIn("required", tool["parameters"])
 
+    def test_all_case_tools_use_strict_closed_schemas(self):
+        self.assertEqual(
+            {tool["name"] for tool in agent_engine.CASE_TOOLS},
+            {
+                "inspect_case",
+                "search_case_evidence",
+                "inspect_policy_assessment",
+                "inspect_workflow_status",
+            },
+        )
+        for tool in agent_engine.CASE_TOOLS:
+            self.assertTrue(tool["strict"])
+            self.assertFalse(tool["parameters"]["additionalProperties"])
+
 
 class ToolExecutionTests(unittest.TestCase):
     def test_search_document_returns_ranked_excerpts(self):
@@ -340,16 +354,28 @@ class AgentLoopTests(unittest.TestCase):
         self.assertIn("Aggressive 63 0 25", tool_outputs[0]["output"])
 
     def test_customer_case_answer_prompt_requires_direct_relevant_language(self):
-        captured_request = {}
+        captured_requests = []
+
+        tool_call = types.SimpleNamespace(
+            type="function_call",
+            name="inspect_policy_assessment",
+            arguments="{}",
+            call_id="case-policy-1",
+        )
+        responses = [
+            types.SimpleNamespace(output=[tool_call], output_text=""),
+            types.SimpleNamespace(
+                output=[types.SimpleNamespace(type="message")],
+                output_text=(
+                    "No. A photograph of the external packaging is still missing."
+                ),
+            ),
+        ]
 
         class FakeResponses:
             def create(self, **kwargs):
-                captured_request.update(copy.deepcopy(kwargs))
-                return types.SimpleNamespace(
-                    output_text=(
-                        "No. A photograph of the external packaging is still missing."
-                    )
-                )
+                captured_requests.append(copy.deepcopy(kwargs))
+                return responses.pop(0)
 
         fake_client = types.SimpleNamespace(responses=FakeResponses())
         complaint = {
@@ -379,18 +405,66 @@ class AgentLoopTests(unittest.TestCase):
                 "Did the reporter submit all required evidence?",
                 complaint=complaint,
                 analysis=analysis,
+                include_trace=True,
             )
 
         self.assertEqual(
-            answer,
+            answer["answer"],
             "No. A photograph of the external packaging is still missing.",
         )
-        instructions = captured_request["instructions"]
-        self.assertIn("Answer the employee's exact question directly", instructions)
-        self.assertIn("Use a short paragraph by default", instructions)
+        self.assertEqual(
+            answer["tool_trace"][0]["tool"],
+            "inspect_policy_assessment",
+        )
+        self.assertEqual(
+            answer["tool_trace"][0]["source"],
+            "No single matching structured policy",
+        )
+        instructions = captured_requests[0]["instructions"]
+        self.assertIn("Choose the smallest relevant tool", instructions)
         self.assertIn("answer yes or no first", instructions)
-        self.assertIn("only when the question asks", instructions)
-        self.assertEqual(captured_request["max_output_tokens"], 400)
+        self.assertIn("human makes the final decision", instructions)
+        self.assertEqual(captured_requests[0]["tool_choice"], "required")
+        self.assertEqual(captured_requests[1]["tool_choice"], "auto")
+        self.assertEqual(captured_requests[0]["max_output_tokens"], 400)
+        tool_outputs = [
+            item
+            for item in captured_requests[1]["input"]
+            if isinstance(item, dict) and item.get("type") == "function_call_output"
+        ]
+        self.assertEqual(tool_outputs[0]["call_id"], "case-policy-1")
+        self.assertIn("missing_required_evidence", tool_outputs[0]["output"])
+
+    def test_case_evidence_search_is_only_used_when_selected(self):
+        complaint = {
+            "case_reference": "CASE-001",
+            "evidence": [{"file_name": "receipt.pdf", "document_id": 12}],
+        }
+
+        class FakeEmbeddingModel:
+            def encode(self, query):
+                self.query = query
+                return [0.1, 0.2]
+
+        with patch.object(
+            agent_engine,
+            "get_embedding_model",
+            return_value=FakeEmbeddingModel(),
+        ), patch.object(
+            agent_engine,
+            "search_document_chunks",
+            return_value=[(0, "Total paid: EUR 89.90", 0.94)],
+        ) as search:
+            result = agent_engine.execute_customer_case_tool(
+                "search_case_evidence",
+                {"query": "receipt total", "max_results": 2},
+                complaint=complaint,
+                analysis={},
+            )
+
+        search.assert_called_once()
+        self.assertEqual(result["excerpts"][0]["file"], "receipt.pdf")
+        self.assertEqual(result["excerpts"][0]["text"], "Total paid: EUR 89.90")
 
 
 if __name__ == "__main__":

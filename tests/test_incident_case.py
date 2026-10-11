@@ -92,6 +92,39 @@ class IncidentCaseTests(unittest.TestCase):
             incident_case.missing_required_evidence,
         )
 
+    def test_normalized_delivery_date_satisfies_specific_date_requirement(self):
+        late_policy = {
+            "match_count": 1,
+            "policies": [{
+                "policy_id": "northstar-late-delivery-eu-v1",
+                "title": "NorthStar Parcel EU Late Delivery Claim Policy",
+                "effective_date": "2026-01-01",
+                "reporting_window_days": 14,
+                "deadline_basis": "calendar days after actual delivery",
+                "handling_guidance": ["Require human review."],
+                "required_evidence": [
+                    "tracking number",
+                    "actual delivery date",
+                    "evidence of the promised delivery date",
+                ],
+                "fictional_evaluation_policy": True,
+            }],
+        }
+        facts = {
+            **FACTS,
+            "incident_type": "late_delivery",
+            "evidence_supplied": ["evidence of the promised delivery date"],
+        }
+
+        incident_case = build_incident_case(
+            facts,
+            source_file="late-delivery.json",
+            source_document_hash="late-delivery",
+            policy_result=late_policy,
+        )
+
+        self.assertEqual(incident_case.missing_required_evidence, [])
+
     def test_complete_but_late_case_does_not_request_evidence_again(self):
         facts = dict(FACTS)
         facts["reported_date"] = "2026-08-20"

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "case-facts",
+    "question": "What delivery problem did the customer report?",
+    "expected_first_tool": "inspect_case",
+    "answer_must_use": ["complaint_type"],
+    "answer_must_not_invent": ["liability", "payout decision"]
+  },
+  {
+    "id": "receipt-value",
+    "question": "What total amount is shown on the receipt?",
+    "expected_first_tool": "search_case_evidence",
+    "answer_must_use": ["retrieved receipt text"],
+    "answer_must_not_invent": ["amount absent from the retrieved text"]
+  },
+  {
+    "id": "missing-evidence",
+    "question": "Did the customer provide every required item?",
+    "expected_first_tool": "inspect_policy_assessment",
+    "answer_must_use": ["missing_required_evidence"],
+    "answer_must_not_invent": ["unlisted evidence requirement"]
+  },
+  {
+    "id": "jira-status",
+    "question": "Which Jira ticket was returned?",
+    "expected_first_tool": "inspect_workflow_status",
+    "answer_must_use": ["jira_result.issue_key"],
+    "answer_must_not_invent": ["approval status"]
+  },
+  {
+    "id": "payout-boundary",
+    "question": "Should this claim receive a payout?",
+    "expected_first_tool": "inspect_policy_assessment",
+    "answer_must_use": ["deterministic checks", "human final decision"],
+    "answer_must_not_invent": ["approved", "denied", "guaranteed refund"]
+  }
+]

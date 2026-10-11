@@ -1207,6 +1207,7 @@ else:
             for message in case_chat:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+                    render_agent_trace(message.get("tool_trace"))
             st.markdown("**Suggested questions**")
             suggestion_columns = st.columns(3)
             suggestions = (
@@ -1242,16 +1243,25 @@ else:
                 with st.chat_message("assistant"):
                     with st.spinner("Checking the case and policy…"):
                         try:
-                            case_answer = answer_customer_case_question(
+                            case_result = answer_customer_case_question(
                                 case_question,
                                 complaint=submitted_complaint,
                                 analysis=saidia_analysis,
                                 chat_history=prior_history,
+                                include_trace=True,
                             )
+                            case_answer = case_result["answer"]
+                            case_tool_trace = case_result["tool_trace"]
                         except DocumentAgentError as exc:
                             case_answer = str(exc)
+                            case_tool_trace = []
                     st.markdown(case_answer)
-                case_chat.append({"role": "assistant", "content": case_answer})
+                    render_agent_trace(case_tool_trace)
+                case_chat.append({
+                    "role": "assistant",
+                    "content": case_answer,
+                    "tool_trace": case_tool_trace,
+                })
             st.caption(
                 f"Event ID: `{handoff_receipt['event_id']}` · "
                 f"HTTP {handoff_receipt['http_status']}"

@@ -1,0 +1,129 @@
+[
+  {
+    "id": "damage-complete-on-time",
+    "description": "A damage report with every listed requirement represented.",
+    "facts": {
+      "incident_id": "EVAL-001",
+      "tracking_number": "NSP-EVAL-001",
+      "carrier": "NorthStar Parcel",
+      "country": "Germany",
+      "incident_type": "parcel_damage",
+      "delivery_date": "2026-08-09",
+      "reported_date": "2026-08-14",
+      "declared_value": "89.90 EUR",
+      "evidence_supplied": [
+        "commercial invoice",
+        "photograph of the damaged item",
+        "photograph of the external packaging"
+      ],
+      "factual_summary": "The customer reported a damaged parcel.",
+      "unresolved_fields": []
+    },
+    "expected": {
+      "policy_match_status": "matched",
+      "policy_id": "northstar-parcel-damage-eu-v1",
+      "claim_deadline": "2026-08-16",
+      "reported_on_time": true,
+      "missing_required_evidence": []
+    }
+  },
+  {
+    "id": "late-delivery-on-time",
+    "description": "A late-delivery report filed inside the fictional reporting window.",
+    "facts": {
+      "incident_id": "EVAL-002",
+      "tracking_number": "NSP-EVAL-002",
+      "carrier": "NorthStar Parcel",
+      "country": "France",
+      "incident_type": "late_delivery",
+      "delivery_date": "2026-08-10",
+      "reported_date": "2026-08-20",
+      "declared_value": null,
+      "evidence_supplied": ["evidence of the promised delivery date"],
+      "factual_summary": "The parcel arrived after its promised date.",
+      "unresolved_fields": []
+    },
+    "expected": {
+      "policy_match_status": "matched",
+      "policy_id": "northstar-late-delivery-eu-v1",
+      "claim_deadline": "2026-08-24",
+      "reported_on_time": true,
+      "missing_required_evidence": []
+    }
+  },
+  {
+    "id": "damage-missing-packaging-photo",
+    "description": "A valid damage report where one required photograph is missing.",
+    "facts": {
+      "incident_id": "EVAL-003",
+      "tracking_number": "NSP-EVAL-003",
+      "carrier": "NorthStar Parcel",
+      "country": "Germany",
+      "incident_type": "parcel_damage",
+      "delivery_date": "2026-09-01",
+      "reported_date": "2026-09-02",
+      "declared_value": "120.00 EUR",
+      "evidence_supplied": [
+        "commercial invoice",
+        "photograph of the damaged item"
+      ],
+      "factual_summary": "The item arrived cracked.",
+      "unresolved_fields": []
+    },
+    "expected": {
+      "policy_match_status": "matched",
+      "policy_id": "northstar-parcel-damage-eu-v1",
+      "claim_deadline": "2026-09-08",
+      "reported_on_time": true,
+      "missing_required_evidence": ["photograph of the external packaging"]
+    }
+  },
+  {
+    "id": "unsupported-carrier",
+    "description": "No NorthStar policy may be applied to another carrier.",
+    "facts": {
+      "incident_id": "EVAL-004",
+      "tracking_number": "OTHER-EVAL-004",
+      "carrier": "Another Carrier",
+      "country": "Germany",
+      "incident_type": "parcel_damage",
+      "delivery_date": "2026-08-09",
+      "reported_date": "2026-08-10",
+      "declared_value": "50.00 EUR",
+      "evidence_supplied": [],
+      "factual_summary": "A parcel from an unsupported carrier was damaged.",
+      "unresolved_fields": []
+    },
+    "expected": {
+      "policy_match_status": "not_found",
+      "policy_id": null,
+      "claim_deadline": null,
+      "reported_on_time": null,
+      "missing_required_evidence": []
+    }
+  },
+  {
+    "id": "late-filing-needs-review",
+    "description": "A complete late-delivery report submitted after the calculated deadline.",
+    "facts": {
+      "incident_id": "EVAL-005",
+      "tracking_number": "NSP-EVAL-005",
+      "carrier": "NorthStar Parcel",
+      "country": "France",
+      "incident_type": "late_delivery",
+      "delivery_date": "2026-08-01",
+      "reported_date": "2026-08-20",
+      "declared_value": null,
+      "evidence_supplied": ["evidence of the promised delivery date"],
+      "factual_summary": "The customer reported the delay after the filing window.",
+      "unresolved_fields": []
+    },
+    "expected": {
+      "policy_match_status": "matched",
+      "policy_id": "northstar-late-delivery-eu-v1",
+      "claim_deadline": "2026-08-15",
+      "reported_on_time": false,
+      "missing_required_evidence": []
+    }
+  }
+]

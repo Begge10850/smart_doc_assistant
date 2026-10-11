@@ -16,7 +16,7 @@ NorthStar Parcel and its policies are fictional. Saidia supports operational rev
 - Calculates filing deadlines and evidence completeness with deterministic Python and PostgreSQL logic.
 - Retrieves relevant policy passages with semantic search and uses an LLM to explain verified results in plain language.
 - Sends new cases and temporary evidence links to Make, which creates a Jira issue and attaches the evidence.
-- Returns the Jira issue details to Streamlit and provides grounded case Q&A for employees.
+- Returns the Jira issue details to Streamlit and demonstrates grounded, read-only case Q&A.
 - Detects an existing active case before another Jira issue is created and returns its case reference to the customer.
 
 ## How a claim moves through Saidia
@@ -32,6 +32,29 @@ NorthStar Parcel and its policies are fictional. Saidia supports operational rev
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    A[Customer form] --> B[(PostgreSQL case facts)]
+    A --> C[Supporting evidence]
+    C --> D{Evidence type}
+    D -->|Digital document| E[Native text extraction]
+    D -->|Scanned text| F[Vision transcription]
+    D -->|Damage photograph| G[Private S3 storage<br/>human inspection]
+    E --> H[768-dimensional embeddings]
+    F --> H
+    H --> I[(pgvector document chunks)]
+    B --> J[Read-only case assistant]
+    I --> J
+    K[(Structured carrier policies)] --> L[Deterministic checks]
+    L --> J
+    J --> M[Grounded answer<br/>with tool activity and sources]
+    B --> N[Make webhook]
+    L --> N
+    C --> N
+    N --> O[Jira review ticket]
+    O --> P[Final human decision]
+```
+
 | Layer | Technology | Responsibility |
 | --- | --- | --- |
 | Customer and reviewer interface | Python, Streamlit | Conditional intake, progress states, results, duplicate response, and case Q&A |
@@ -41,6 +64,27 @@ NorthStar Parcel and its policies are fictional. Saidia supports operational rev
 | Evidence storage | Private Amazon S3 | Original file storage and short-lived download links for the Jira handoff |
 | Workflow automation | Make | Duplicate routing, Jira creation, attachment transfer, result recording, and webhook responses |
 | Review queue | Jira | Operational ticket, case details, policy assessment, evidence status, attachments, and human ownership |
+
+### Read-only case-assistant tools
+
+The case Q&A does not receive every available value automatically. It must choose
+from four narrow tools:
+
+| Tool | Reads |
+| --- | --- |
+| `inspect_case` | Customer form facts and evidence-file inventory |
+| `search_case_evidence` | Relevant text from receipts, invoices, and other supporting documents |
+| `inspect_policy_assessment` | Deterministic policy, deadline, and missing-evidence results |
+| `inspect_workflow_status` | Allow-listed Make and Jira receipt fields |
+
+Vision is evidence-preparation infrastructure, not a free agent tool. It may
+transcribe a scanned textual document, while damage photographs remain unchanged
+for a human reviewer.
+
+The interface displays the selected tools and concise source labels after each
+answer. This makes it possible to see whether the answer came from the customer
+form, a supporting document, the structured policy assessment, or the stored
+Make/Jira receipt.
 
 PostgreSQL was chosen because the workflow needs relational integrity, transactions, and database constraints, not only flexible object storage. pgvector keeps semantic retrieval beside the case and policy data instead of adding a separate vector database. The sentence-transformer model provides reproducible local embeddings suited to a small, focused policy library. The LLM is used only where language is useful. Authoritative deadlines, evidence requirements, and duplicate constraints remain deterministic.
 
@@ -128,7 +172,26 @@ Run the automated suite with:
 
 ```bash
 python3 -m pytest -q
+python3 evaluations/run_core_evaluation.py
 ```
+
+The latest local verification recorded **54 passing automated tests**. The
+five-case deterministic evaluation initially passed 3/5 and exposed a date-label
+mapping defect. After the repair and regression test, it passed 5/5. See
+`docs/EVALUATION.md` and `evaluations/results/core_results.json`.
+
+The measured core business-rule and handoff modules have **81% statement
+coverage**. This deliberately scoped figure covers `customer_intake`,
+`incident_case`, `policy_store`, `embedding_config`, and `case_handoff`; it is
+not presented as coverage of the entire Streamlit application.
+
+These results cover local code and deterministic policy behaviour. They do not
+claim a measured hallucination rate or prove the live OpenAI, Supabase, S3, Make,
+or Jira configuration.
+
+A read-only check of the configured PostgreSQL database confirmed all expected
+tables and `vector(768)` columns. It did not change data or replace a fresh-database
+migration test.
 
 Production smoke testing should confirm two paths with a new tracking number:
 
@@ -143,6 +206,14 @@ Production smoke testing should confirm two paths with a new tracking number:
 - Human review: mandatory for every claim
 - Image understanding: not implemented
 - External tracking verification: not implemented
+- Employee authentication and role-based access: not implemented; the current
+  case Q&A is a portfolio demonstration using the submitter's current case context
+
+## Learning documentation
+
+- `docs/LEARNING_GUIDE.md` explains the system from the beginning in plain language.
+- `docs/EVALUATION.md` explains what was measured and what was not.
+- `docs/IMPLEMENTATION_LOG.md` records the focused portfolio update.
 
 ## License
 

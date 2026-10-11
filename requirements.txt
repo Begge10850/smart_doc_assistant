@@ -22,3 +22,7 @@ python-dotenv  # optional: only used if st.secrets not available
 psycopg[binary]
 
 pgvector==0.4.2
+
+# Test runner used by the documented verification command
+pytest
+pytest-cov

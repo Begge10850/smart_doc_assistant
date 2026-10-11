@@ -102,7 +102,12 @@ def _evidence_is_supplied(required_item: str, facts: Dict[str, Any]) -> bool:
 
     if normalized_required == "tracking number":
         return bool(facts.get("tracking_number"))
-    if normalized_required == "delivery date":
+    if normalized_required in {
+        "delivery date",
+        "actual delivery date",
+        "expected delivery date",
+        "carrier recorded delivery date",
+    }:
         return bool(facts.get("delivery_date"))
     if normalized_required == "damage report date":
         return bool(facts.get("reported_date"))
