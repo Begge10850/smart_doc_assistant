@@ -175,7 +175,7 @@ python3 -m pytest -q
 python3 evaluations/run_core_evaluation.py
 ```
 
-The latest local verification recorded **54 passing automated tests**. The
+The latest local verification recorded **55 passing automated tests**. The
 five-case deterministic evaluation initially passed 3/5 and exposed a date-label
 mapping defect. After the repair and regression test, it passed 5/5. See
 `docs/EVALUATION.md` and `evaluations/results/core_results.json`.
@@ -185,13 +185,23 @@ coverage**. This deliberately scoped figure covers `customer_intake`,
 `incident_case`, `policy_store`, `embedding_config`, and `case_handoff`; it is
 not presented as coverage of the entire Streamlit application.
 
-These results cover local code and deterministic policy behaviour. They do not
-claim a measured hallucination rate or prove the live OpenAI, Supabase, S3, Make,
-or Jira configuration.
+Those results cover local code and deterministic policy behaviour. The separate
+small live evaluation below measures five model answers and one external smoke
+test; neither result proves production reliability.
 
 A read-only check of the configured PostgreSQL database confirmed all expected
 tables and `vector(768)` columns. It did not change data or replace a fresh-database
 migration test.
+
+A deliberately small live evaluation ran five saved questions once against one
+fictional deployed case. First-tool selection and displayed source traces were
+correct in 5/5 questions; 4/5 answers met the strict grounding rubric; and the
+single payout question preserved human decision authority. The failed answer
+referred to an image when no evidence file existed. That failure was retained,
+corrected in the empty-evidence tool output, and covered by a regression test.
+Median observed answer latency was 9.672 seconds. These figures describe five
+runs, not production accuracy. See `docs/EVALUATION.md` and
+`evaluations/results/live_case_assistant_results.json`.
 
 Production smoke testing should confirm two paths with a new tracking number:
 

@@ -669,13 +669,17 @@ def execute_customer_case_tool(tool_name, arguments, *, complaint, analysis):
             item for item in complaint.get("evidence", []) if item.get("document_id")
         ]
         if not searchable_evidence:
+            evidence_inventory = complaint.get("evidence", [])
+            notice = (
+                "Supporting files exist, but none has searchable text. The tool "
+                "cannot determine their contents."
+                if evidence_inventory
+                else "No supporting evidence file is available for this case."
+            )
             return {
                 "query": query,
                 "excerpts": [],
-                "notice": (
-                    "No supporting document has searchable text. Images remain "
-                    "available only for human inspection."
-                ),
+                "notice": notice,
             }
         query_embedding = get_embedding_model().encode(query)
         excerpts = []

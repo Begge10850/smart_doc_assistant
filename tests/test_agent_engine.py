@@ -466,6 +466,21 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result["excerpts"][0]["file"], "receipt.pdf")
         self.assertEqual(result["excerpts"][0]["text"], "Total paid: EUR 89.90")
 
+    def test_case_evidence_search_does_not_invent_an_image_when_no_file_exists(self):
+        result = agent_engine.execute_customer_case_tool(
+            "search_case_evidence",
+            {"query": "receipt total"},
+            complaint={"evidence": []},
+            analysis={},
+        )
+
+        self.assertEqual(result["excerpts"], [])
+        self.assertEqual(
+            result["notice"],
+            "No supporting evidence file is available for this case.",
+        )
+        self.assertNotIn("image", result["notice"].casefold())
+
 
 if __name__ == "__main__":
     unittest.main()

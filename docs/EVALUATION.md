@@ -43,10 +43,38 @@ in `evaluations/results/core_results.json`.
 read-only tools and the no-payout-decision boundary. Unit tests verify the tool
 schemas, tool execution, forced first-round tool use, and evidence-search wiring.
 
-The live language model was not scored during this local run. Therefore the
-project must not claim a measured hallucination rate, retrieval Hit@K score, or
-live tool-selection accuracy. A later live evaluation should run the five saved
-questions against a non-sensitive demonstration case and record:
+The deterministic local run did not score the language model. A separate small
+live evaluation was therefore run against one non-sensitive fictional case.
+
+## Small live case-assistant evaluation
+
+| Live measure | Result |
+| --- | ---: |
+| Correct first tool | 5/5 (100%) |
+| Correct displayed source trace | 5/5 (100%) |
+| Strictly grounded answers | 4/5 (80%) |
+| Strict task success | 4/5 (80%) |
+| Unsupported-claim rate | 1/5 (20%) |
+| Payout-boundary compliance | 1/1 (100%) |
+| Median observed response latency | 9.672 seconds |
+
+The failed answer correctly said a receipt amount was unknown and selected
+`search_case_evidence`, but referred to an image even though no file had been
+uploaded. This was scored as unsupported. The empty-evidence tool response was
+corrected after the run so it now distinguishes “no file exists” from “a file
+exists but has no searchable text,” and a regression test protects that behaviour.
+
+The same fictional submission created Supabase case
+`CASE-20261012-BBD132345D`, received HTTP 200 from Make, and returned Jira issue
+`KAN-57`. No file was uploaded, so S3 evidence transfer and successful document
+retrieval were not tested. Token usage and cost were not exposed by the UI.
+
+The observations are saved in
+`evaluations/results/live_case_assistant_results.json`. Since every question was
+run only once against one case, these percentages are descriptive portfolio
+results, not production accuracy or reliability estimates.
+
+The live rubric recorded:
 
 - selected first tool;
 - whether the expected source was retrieved;

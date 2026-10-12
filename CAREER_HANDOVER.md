@@ -182,12 +182,14 @@ The test suite covers areas including:
 
 ### Current verification result
 
-- A dependency-equipped Python 3.12 run completed 54 automated tests successfully.
+- A dependency-equipped Python 3.12 run completed 55 automated tests successfully.
 - A five-case deterministic evaluation initially passed 3/5 cases, exposed a date-label mapping defect, and passed 5/5 after the repair and regression test.
 - The deliberately scoped core business-rule and handoff modules measured 81% statement coverage (453 statements, 86 missed). This is not a whole-application coverage figure.
 - The live language model, hosted database, S3, Make, and Jira were not exercised by this local verification.
+- A separate five-question live run selected the expected first tool in 5/5 questions, displayed the expected source trace in 5/5, produced 4/5 strictly grounded answers, and preserved the payout boundary in 1/1 applicable question. One unsupported reference to an image was recorded, corrected, and covered by a regression test.
+- One fictional deployed smoke test created a Supabase case, received HTTP 200 from Make, and returned Jira issue `KAN-57`. No file was uploaded, so S3 evidence transfer was not tested.
 
-The project still has no verified hallucination rate, live retrieval Hit@K score, production latency benchmark, throughput benchmark, or A/B evaluation. The saved case-assistant evaluation questions define how those checks can be performed later with fictional data.
+The project still has no production hallucination rate, live retrieval Hit@K score, throughput benchmark, cost benchmark, or A/B evaluation. The recorded 20% unsupported-claim rate and 9.672-second median latency describe only five single-run questions against one fictional case.
 
 ## Verified results and findings
 
@@ -266,7 +268,7 @@ The project is strongest as evidence of applied AI, data engineering, workflow a
 - Implemented versioned policy matching, filing-deadline calculation, evidence-completeness checks, and concurrency-safe duplicate prevention using Python and PostgreSQL.
 - Developed a grounded RAG workflow using 768-dimensional sentence-transformer embeddings, pgvector semantic search, and the OpenAI Responses API for policy explanations and read-only case Q&A.
 - Secured case evidence in private Amazon S3 storage with case-scoped object keys and one-hour presigned links, then automated idempotent Jira issue and attachment handoff through Make webhooks.
-- Verified 54 automated tests, a 5/5 deterministic case evaluation, and 81% statement coverage across the explicitly scoped core business-rule and handoff modules.
+- Verified 55 automated tests, a 5/5 deterministic case evaluation, 5/5 live first-tool selections, 4/5 strictly grounded live answers, and 81% statement coverage across the explicitly scoped core business-rule and handoff modules.
 
 ## Concise LinkedIn project description
 
@@ -280,7 +282,7 @@ Built Saidia, an AI-assisted logistics claims workflow that turns customer deliv
 
 **Action:** I built the customer flow in Streamlit and modelled cases, policies, evidence, workflow results, processing events, and vector chunks in PostgreSQL. I kept filing deadlines and evidence checks deterministic, then used `all-mpnet-base-v2` embeddings and pgvector to retrieve relevant policy passages. The OpenAI layer explains those verified results and supports constrained, read-only Q&A. I stored original evidence privately in S3 with temporary links and connected the app to Make through an HTTPS webhook for idempotent Jira creation and attachment handling. I added application- and database-level duplicate protection, allow-listed the returned Jira fields, persisted failures for recovery, and wrote tests for the main rules and integration boundaries.
 
-**Result:** The repository demonstrates a working technical path from intake to a review-ready operational case across five configured complaint types, with human decision authority preserved. In the current verification, all 54 automated tests passed. A five-case deterministic evaluation passed 5/5 after exposing and guiding the repair of a date-label mapping defect, and the explicitly scoped core business-rule and handoff modules measured 81% statement coverage. The result is a validated portfolio implementation, not evidence of production adoption or measured business savings.
+**Result:** The repository demonstrates a working technical path from intake to a review-ready operational case across five configured complaint types, with human decision authority preserved. In the current verification, all 55 automated tests passed. A five-case deterministic evaluation passed 5/5 after exposing and guiding the repair of a date-label mapping defect, and the explicitly scoped core business-rule and handoff modules measured 81% statement coverage. A small five-question live evaluation selected the expected tool in 5/5 runs and produced 4/5 strictly grounded answers; the one failure was retained and repaired. The result is a validated portfolio implementation, not evidence of production adoption or measured business savings.
 
 ## Claims that must not be made
 

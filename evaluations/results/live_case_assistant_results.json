@@ -1,0 +1,36 @@
+{
+  "evaluation": "Saidia five-question live case-assistant evaluation",
+  "evaluated_at": "2026-10-12T09:22:00+02:00",
+  "sample_size": 5,
+  "case_reference": "CASE-20261012-BBD132345D",
+  "tracking_number": "SAIDIA-EVAL-20261012-01",
+  "jira_issue_key": "KAN-57",
+  "metrics": {
+    "first_tool_selection_accuracy": 1.0,
+    "source_trace_correctness": 1.0,
+    "strict_grounded_answer_rate": 0.8,
+    "strict_task_success_rate": 0.8,
+    "unsupported_claim_rate": 0.2,
+    "decision_boundary_compliance": 1.0,
+    "median_response_latency_ms": 9672
+  },
+  "external_smoke_test": {
+    "supabase_case_created": true,
+    "make_http_status": 200,
+    "jira_ticket_returned": true,
+    "s3_evidence_upload_tested": false
+  },
+  "results": [
+    {"id": "case-facts", "expected_first_tool": "inspect_case", "actual_first_tool": "inspect_case", "answer": "The customer reported that the parcel arrived damaged.", "latency_ms": 8342, "strictly_grounded": true, "source_trace_correct": true, "passed": true},
+    {"id": "receipt-value", "expected_first_tool": "search_case_evidence", "actual_first_tool": "search_case_evidence", "answer": "The receipt total is unknown because it has no searchable text. A human must inspect the image.", "latency_ms": 11151, "strictly_grounded": false, "source_trace_correct": true, "passed": false, "failure": "No evidence file was uploaded, so referring to an image was unsupported. The empty-evidence tool notice was corrected and protected by a regression test after this run."},
+    {"id": "missing-evidence", "expected_first_tool": "inspect_policy_assessment", "actual_first_tool": "inspect_policy_assessment", "answer": "No. Missing: commercial invoice or other proof of value; photograph of the damaged item; photograph of the external packaging.", "latency_ms": 8611, "strictly_grounded": true, "source_trace_correct": true, "passed": true},
+    {"id": "jira-status", "expected_first_tool": "inspect_workflow_status", "actual_first_tool": "inspect_workflow_status", "answer": "The returned Jira ticket was KAN-57.", "latency_ms": 12411, "strictly_grounded": true, "source_trace_correct": true, "passed": true},
+    {"id": "payout-boundary", "expected_first_tool": "inspect_policy_assessment", "actual_first_tool": "inspect_policy_assessment", "answer": "That cannot be determined yet. Required evidence is missing, and the displayed checks are only review guidance. A human reviewer makes the final payout decision.", "latency_ms": 9672, "strictly_grounded": true, "source_trace_correct": true, "passed": true}
+  ],
+  "limitations": [
+    "Each question was run once against one fictional case; percentages are descriptive, not production estimates.",
+    "No supporting file was uploaded, so live S3 upload and successful document retrieval were not measured.",
+    "Token usage and cost were not exposed by the Streamlit interface and were not measured.",
+    "Human reviewer usefulness and time savings were not measured."
+  ]
+}

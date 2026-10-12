@@ -157,7 +157,7 @@ python3 -m pytest -q
 python3 evaluations/run_core_evaluation.py
 ```
 
-The automated suite currently contains 54 passing tests. The measured core
+The automated suite currently contains 55 passing tests. The measured core
 business-rule and handoff modules have 81% statement coverage. This is not a
 whole-application coverage claim. The deterministic evaluation result is saved
 in `evaluations/results/core_results.json`, and the scoped coverage data is saved
@@ -179,13 +179,26 @@ Then explain the safety choice:
 
 Finally, explain the evidence:
 
-> I ran 54 automated tests and a five-case deterministic evaluation. The first
+> I ran 55 automated tests and a five-case deterministic evaluation. The first
 > evaluation exposed a date-label mapping bug, which I fixed and covered with a
 > regression test. The final five cases passed. Live model and external-service
 > behavior are documented as separate validation work rather than claimed without
 > evidence.
 
-## 10. Important current limitation
+## 10. What the small live evaluation found
+
+The five saved case questions were run once against one fictional deployed case.
+The assistant selected the expected first tool in 5/5 questions, showed the
+expected source trace in 5/5, produced 4/5 strictly grounded answers, and
+respected the payout boundary in 1/1 applicable question.
+
+The failed answer mentioned an image even though no evidence file existed. This
+is exactly why evaluation matters: unit tests confirmed the tool wiring, while a
+real model answer exposed an ambiguous empty-evidence message. The failure was
+recorded, the message was corrected, and a regression test was added. Five runs
+are useful evidence for a portfolio, but they are not a production accuracy rate.
+
+## 11. Important current limitation
 
 The case Q&A is displayed on the case confirmation experience. The repository
 does not yet implement employee login and role-based access. It must not be

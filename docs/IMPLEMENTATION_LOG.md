@@ -28,9 +28,12 @@ making existing portfolio claims accurate and testable.
 
 ## Verification performed
 
-- 54 automated tests passed locally in a temporary Python 3.12 environment.
+- 55 automated tests passed locally in a temporary Python 3.12 environment.
 - Core business-rule and handoff modules measured 81% statement coverage.
 - The five-case deterministic evaluation passed after the documented repair.
+- A five-question live run recorded 5/5 correct first-tool selections, 4/5
+  strictly grounded answers, and one unsupported reference that was corrected
+  and protected with a regression test.
 - No live customer data was used.
 - A read-only hosted PostgreSQL check confirmed all expected tables, two
   `vector(768)` columns, eight stored policies, and eight policy chunks.
