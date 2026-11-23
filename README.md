@@ -1,7 +1,5 @@
 # Saidia Logistics Claims
 
-[**Read the concise portfolio case study →**](https://trevaogwang.com/projects/saidia-logistics-claims)
-
 Saidia is an internal claims assistant for NorthStar Parcel. It turns a customer delivery report into a structured case, applies versioned policy rules, explains the assessment in plain language, and creates a Jira ticket for human review.
 
 [Open the live application](https://smartdocassistant-ibk4wvbdysw7fqkfpkxb7q.streamlit.app/)
